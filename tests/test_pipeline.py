@@ -123,10 +123,10 @@ def test_dry_run_leaves_library_empty(psort, tmp_path):
 def test_status(psort):
     psort("run")
     out = psort("status").output
-    assert "Photos:           11" in out
-    assert "Exact duplicates: 1" in out
-    assert "Undated:          1" in out
-    assert "Face detection:   off" in out
+    assert "Photos:            11" in out
+    assert "Exact duplicates:  1" in out
+    assert "Undated:           1" in out
+    assert "Face detection:    off" in out
 
 
 def test_heic_copy_is_original_format(psort, tmp_path):

@@ -16,6 +16,7 @@
     <figcaption>
       <span class="name">{{ p.name }}</span>
       {% if p.shots > 1 %}<span class="pill">{{ p.shots }} shots</span>{% endif %}
+      {% if p.copies %}<span class="pill" title="Same picture saved more than once; extra copies are in _duplicates">+{{ p.copies }} duplicate{{ "" if p.copies == 1 else "s" }}</span>{% endif %}
       {% if p.close_call %}<span class="pill warn">close call</span>{% endif %}
       {% if p.in_tray %}<span class="pill ok">in tray</span>{% endif %}
       {% if p.people %}<div class="people">{{ p.people }}</div>{% endif %}

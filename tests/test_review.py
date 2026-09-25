@@ -180,11 +180,9 @@ def submit(client, url, action_contains, **extra):
 
 
 def test_every_rendered_form_carries_the_token(ui, tmp_path, sample_inbox):
-    from conftest import save, scene
+    from conftest import add_close_call, save, scene
 
-    twin = scene(60)
-    save(sample_inbox / "twins/IMG_3000.jpg", twin, "2026:07:06 10:00:00")
-    save(sample_inbox / "twins/IMG_3001.jpg", twin.point(lambda v: min(255, v + 3)), "2026:07:06 10:00:01")
+    add_close_call(sample_inbox)
     from typer.testing import CliRunner
 
     from psort.cli import app
@@ -201,14 +199,12 @@ def test_every_rendered_form_carries_the_token(ui, tmp_path, sample_inbox):
 
 
 def test_rendered_buttons_work(ui, tmp_path, sample_inbox):
-    from conftest import save, scene
+    from conftest import add_close_call
     from typer.testing import CliRunner
 
     from psort.cli import app
 
-    twin = scene(60)
-    save(sample_inbox / "twins/IMG_3000.jpg", twin, "2026:07:06 10:00:00")
-    save(sample_inbox / "twins/IMG_3001.jpg", twin.point(lambda v: min(255, v + 3)), "2026:07:06 10:00:01")
+    add_close_call(sample_inbox)
     CliRunner().invoke(app, ["--config", str(tmp_path / "psort.toml"), "run"])
 
     # Close calls: "Pick this" on the runner-up.
@@ -251,3 +247,11 @@ def test_stale_page_gets_a_helpful_message(ui, tmp_path):
     sha = sha_of(tmp_path, "20260703_145633")["sha256"]
     resp = ui.post(f"/photo/{sha}/best", data={"csrf": "token-from-an-old-launch"})
     assert resp.status_code == 403 and "reload the page" in resp.get_data(as_text=True)
+
+
+def test_dark_mode_is_default(ui):
+    page = text(ui.get("/"))
+    assert '<html lang="en" data-theme="dark">' in page
+    assert 'localStorage.getItem("psort-theme") || "dark"' in page and "toggleTheme()" in page
+    css = ui.get("/static/style.css").get_data(as_text=True)
+    assert '[data-theme="light"]' in css

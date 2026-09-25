@@ -4,8 +4,10 @@
 {% block content %}
 {% set when, event = pretty_folder(folder_key) %}
 <p><a href="{{ url_for('folder', key=folder_key) }}">← {{ when }} {{ event }}</a></p>
-<h1>{% if shots|length > 1 %}Moment: {{ shots|length }} shots{% else %}{{ shots[0].name }}{% endif %}</h1>
-{% if shots|length > 1 %}
+{% set real = shots|rejectattr("duplicate_of")|list %}
+<h1>{% if real|length > 1 %}Moment: {{ real|length }} shots{% else %}{{ shots[0].name }}{% endif %}
+  {% if shots|length > real|length %}<span class="pill">+{{ shots|length - real|length }} duplicate{{ "" if shots|length - real|length == 1 else "s" }}</span>{% endif %}</h1>
+{% if real|length > 1 %}
   <p class="muted">
     {% if shots[0].user_best %}You picked the best shot. {{ post(url_for('auto', moment_id=moment_id), "Let psort pick again") }}
     {% else %}psort picked the best shot automatically{% if shots[0].close_call %}, but it was a close call{% endif %}.{% endif %}
@@ -20,7 +22,9 @@
     <div class="meta">
       <strong>{{ s.name }}</strong>
       {% if s.is_best %}<span class="pill ok">★ best</span>{% endif %}
-      {% if shots|length > 1 and not s.is_best %}{{ post(url_for('best', sha=s.sha256), "Make this the best") }}{% endif %}
+      {% if s.duplicate_of %}<span class="pill">duplicate of {{ s.copy_of }}</span>
+        <span class="muted">Same picture saved again. psort kept the better copy; this one is in _duplicates.</span>
+      {% elif real|length > 1 and not s.is_best %}{{ post(url_for('best', sha=s.sha256), "Make this the best") }}{% endif %}
       {{ post(url_for('tray_toggle', sha=s.sha256), "Remove from post tray" if s.in_tray else "Add to post tray",
               "ok" if s.in_tray else "") }}
       <dl>

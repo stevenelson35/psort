@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS photos (
     score          REAL,
     is_best        INTEGER NOT NULL DEFAULT 0,
     close_call     INTEGER NOT NULL DEFAULT 0,  -- runner-up nearly as good: worth a look
+    duplicate_of   TEXT,                   -- visual copy of this sha256 (same picture saved twice)
     user_best      INTEGER NOT NULL DEFAULT 0,  -- review UI override
     name           TEXT UNIQUE,            -- library stem, assigned once: YYYYMMDD_HHMMSS[_n]
     library_path   TEXT,                   -- relative to library root
@@ -109,6 +110,7 @@ CREATE INDEX IF NOT EXISTS faces_person ON faces(person_id);
 _ADDED_COLUMNS = [
     ("photos", "close_call", "INTEGER NOT NULL DEFAULT 0"),
     ("photos", "faces_scanned", "INTEGER NOT NULL DEFAULT 0"),
+    ("photos", "duplicate_of", "TEXT"),
 ]
 
 

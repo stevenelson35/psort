@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import save, scene
+from conftest import add_close_call, save, scene
 from psort.events import EventError, slugify
 from test_pipeline import library_files
 
@@ -63,12 +63,10 @@ def test_close_calls(psort, tmp_path, sample_inbox: Path):
     assert "No close calls." in psort("close-calls").output
 
     # Two nearly identical sharp shots: a near tie.
-    twin = scene(60)
-    save(sample_inbox / "twins/IMG_3000.jpg", twin, "2026:07:06 10:00:00")
-    save(sample_inbox / "twins/IMG_3001.jpg", twin.point(lambda v: min(255, v + 3)), "2026:07:06 10:00:01")
+    add_close_call(sample_inbox)
     psort("run")
     out = psort("close-calls").output
     assert "1 close call(s)" in out
     assert "20260706_100000" in out and "20260706_100001" in out
     assert "20260703_1456" not in out  # the clear-cut burst isn't flagged
-    assert "Close calls:      1" in psort("status").output
+    assert "Close calls:       1" in psort("status").output

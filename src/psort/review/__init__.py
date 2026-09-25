@@ -305,7 +305,10 @@ def create_app(cfg: Config) -> Flask:
 
 # Columns every photo card needs; `p` is photos.
 CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.close_call,
-    (SELECT COUNT(*) FROM photos m WHERE m.moment_id = p.moment_id) AS shots,
+    (SELECT COUNT(*) FROM photos m WHERE m.moment_id = p.moment_id AND m.duplicate_of IS NULL) AS shots,
+    (SELECT COUNT(*) FROM photos m WHERE m.moment_id = p.moment_id AND m.duplicate_of IS NOT NULL) AS copies,
+    p.duplicate_of,
+    (SELECT d.name FROM photos d WHERE d.sha256 = p.duplicate_of) AS copy_of,
     EXISTS (SELECT 1 FROM tray t WHERE t.sha256 = p.sha256) AS in_tray,
     (SELECT group_concat(name, ', ') FROM (SELECT DISTINCT pe.name FROM faces f
         JOIN people pe ON pe.id = f.person_id WHERE f.sha256 = p.sha256 ORDER BY pe.name)) AS people,

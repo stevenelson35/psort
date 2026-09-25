@@ -102,7 +102,7 @@ def ingest_cmd() -> None:
 def cluster_cmd() -> None:
     """Group near-duplicate bursts into moments."""
     cfg, conn = _open()
-    typer.echo(f"Moments: {cluster(cfg, conn)}")
+    _cluster(cfg, conn)
 
 
 @app.command("score")
@@ -125,7 +125,7 @@ def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; sho
     """Ingest → cluster → score → curate → faces."""
     cfg, conn = _open()
     _ingest(cfg, conn)
-    typer.echo(f"Moments: {cluster(cfg, conn)}")
+    _cluster(cfg, conn)
     score(cfg, conn)
     _curate(cfg, conn, dry_run)
     if not dry_run:
@@ -166,7 +166,8 @@ def status() -> None:
     counts = {
         "Photos": "SELECT COUNT(*) FROM photos",
         "Moments": "SELECT COUNT(DISTINCT moment_id) FROM photos",
-        "Alternates": "SELECT COUNT(*) FROM photos WHERE is_best = 0",
+        "Alternates": "SELECT COUNT(*) FROM photos WHERE is_best = 0 AND duplicate_of IS NULL",
+        "Visual duplicates": "SELECT COUNT(*) FROM photos WHERE duplicate_of IS NOT NULL",
         "Close calls": "SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1",
         "Named events": "SELECT COUNT(*) FROM named_events",
         "Named people": "SELECT COUNT(*) FROM people",
@@ -179,9 +180,9 @@ def status() -> None:
         "Unreadable": "SELECT COUNT(*) FROM sources WHERE status = 'error'",
     }
     for label, sql in counts.items():
-        typer.echo(f"{label + ':':18}{conn.execute(sql).fetchone()[0]}")
-    typer.echo(f"{'Face detection:':18}{'on' if cfg.face_model.exists() else 'off (model not downloaded)'}")
-    typer.echo(f"{'Face recognition:':18}{'on' if cfg.recognition_model.exists() else 'off (model not downloaded)'}")
+        typer.echo(f"{label + ':':19}{conn.execute(sql).fetchone()[0]}")
+    typer.echo(f"{'Face detection:':19}{'on' if cfg.face_model.exists() else 'off (model not downloaded)'}")
+    typer.echo(f"{'Face recognition:':19}{'on' if cfg.recognition_model.exists() else 'off (model not downloaded)'}")
 
 
 @app.command("close-calls")
@@ -341,6 +342,12 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
         f"Ingest: {s.new_photos} new, {s.duplicates} exact duplicates, {s.unchanged} unchanged, "
         f"{s.skipped} skipped, {s.errors} unreadable"
     )
+
+
+def _cluster(cfg: Config, conn: sqlite3.Connection) -> None:
+    moments = cluster(cfg, conn)
+    copies = conn.execute("SELECT COUNT(*) FROM photos WHERE duplicate_of IS NOT NULL").fetchone()[0]
+    typer.echo(f"Moments: {moments} ({copies} visual duplicates set aside in _duplicates)")
 
 
 def _faces(cfg: Config, conn: sqlite3.Connection) -> None:

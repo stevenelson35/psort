@@ -16,6 +16,7 @@ from .ingest import inbox_files
 
 UNDATED_DIR = "_undated"
 ALTERNATES_DIR = "_alternates"
+DUPLICATES_DIR = "_duplicates"
 
 
 @dataclass
@@ -49,7 +50,10 @@ def assign_names(conn: sqlite3.Connection) -> None:
 
 def desired_paths(conn: sqlite3.Connection) -> dict[str, str]:
     """sha256 → library-relative path, from the current moments and best picks."""
-    rows = conn.execute("SELECT sha256, name, ext, taken_at, date_source, moment_id, is_best FROM photos").fetchall()
+    rows = conn.execute(
+        "SELECT sha256, name, ext, taken_at, date_source, moment_id, is_best, duplicate_of FROM photos"
+    ).fetchall()
+    names = {r["sha256"]: r["name"] for r in rows}
     best = {r["moment_id"]: r for r in rows if r["is_best"]}
     ranges = named_ranges(conn)
     paths = {}
@@ -63,6 +67,9 @@ def desired_paths(conn: sqlite3.Connection) -> dict[str, str]:
         folder = f"{day[:4]}/{day}_{slug}" if slug else f"{day[:4]}/{day}"
         if r["is_best"]:
             paths[r["sha256"]] = f"{folder}/{r['name']}{r['ext']}"
+        elif r["duplicate_of"]:
+            # Grouped under the copy that was kept, e.g. _duplicates/20260703_145634/…
+            paths[r["sha256"]] = f"{folder}/{DUPLICATES_DIR}/{names[r['duplicate_of']]}/{r['name']}{r['ext']}"
         else:
             paths[r["sha256"]] = f"{folder}/{ALTERNATES_DIR}/{b['name']}/{r['name']}{r['ext']}"
     return paths

@@ -84,6 +84,13 @@ These scores are only compared **within a moment**, so each photo is ranked agai
 | Exposure | Share of the histogram that's crushed to black or blown to white, and distance from mid-tones |
 
 - The composite is a weighted sum, with weights set in `psort.toml`. The highest score becomes the **best** pick unless you've overridden it.
+- **Visual duplicates:** the same picture saved more than once with different bytes, like two PhotoPass downloads, a re-compressed copy, or a resized "shared" copy. Exact duplicates are already skipped at ingest (§5.1). Within a moment, two photos count as copies when all of these hold:
+  - they're within `duplicate_gap_seconds` (1) of each other
+  - their perceptual hashes differ by at most `duplicate_phash_threshold` (2)
+  - their exposure is the same
+  - they're either the same size with sharpness within 10%, or the same shape at a different size (a resized copy)
+
+  The sharpness test matters: a blurry burst frame looks identical at hash level, but it's a real alternative, not a copy. The copy with the most pixels, then the sharpest, then the largest file, stays in the moment. The others go to `_duplicates/<kept-name>/`. They never compete for best and never make a close call. Picking a copy as best counts as picking the copy that was kept.
 - **Close calls:** when the runner-up scores within `close_call_margin` of the best (default 5%), the moment is flagged. `psort close-calls` lists them, and the review UI shows them first, so you only check the near ties. Once you pick a shot, the flag clears.
 - Eyes-open and smile detection are future ideas.
 
@@ -99,6 +106,9 @@ psort-library/
       _alternates/
         20260703_145633/            ← the other shots from that moment
           20260703_145634.heic
+      _duplicates/
+        20260703_145633/            ← extra copies of the same picture (§5.3)
+          20260703_145633_1.jpg
     2026-07-03_fireworks/           ← a second event on the same day
     2026-07-04_summer-trip/         ← a multi-day event: one folder per day
     2026-07-05_summer-trip/
@@ -168,6 +178,7 @@ psort-library/
   - **Post tray:** photos picked for the next post, for export (§7).
 - Every decision updates the library right away: files move, folders are renamed, and the manifest is rewritten.
 - **Face rejections:** unticking a face or clicking "Not <name>" is remembered. That face is never auto-matched to that person again, unless you name it that person yourself.
+- **Appearance:** dark mode is on by default. The ☀/☾ button switches to light, and each browser remembers the choice.
 - **Thumbnails** (320px and 1280px, including HEIC converted to JPEG) and face crops are cached in the state folder. The files are named by photo content, so they never go stale.
 
 ## 7. Export for a Post

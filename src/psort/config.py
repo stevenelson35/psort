@@ -32,6 +32,8 @@ class Config:
     burst_gap_seconds: float = 10.0
     phash_threshold: int = 10
     close_call_margin: float = 0.05
+    duplicate_gap_seconds: float = 1.0
+    duplicate_phash_threshold: int = 2
     event_gap_hours: float = 3.0
     face_match_threshold: float = 0.45
     face_cluster_threshold: float = 0.5
@@ -75,6 +77,8 @@ def load(path: Path) -> Config:
             burst_gap_seconds=float(cluster.get("burst_gap_seconds", 10.0)),
             phash_threshold=int(cluster.get("phash_threshold", 10)),
             close_call_margin=float(cluster.get("close_call_margin", 0.05)),
+            duplicate_gap_seconds=float(cluster.get("duplicate_gap_seconds", 1.0)),
+            duplicate_phash_threshold=int(cluster.get("duplicate_phash_threshold", 2)),
             event_gap_hours=float(events.get("gap_hours", 3.0)),
             face_match_threshold=float(faces.get("match_threshold", 0.45)),
             face_cluster_threshold=float(faces.get("cluster_threshold", 0.5)),
@@ -103,6 +107,10 @@ burst_gap_seconds = 10
 phash_threshold = 10
 # Flag a moment for review when the runner-up scores within this fraction of the best.
 close_call_margin = 0.05
+# Visual duplicates (the same picture saved twice) must be this close in time and look.
+# The best-quality copy stays; the others go to _duplicates/.
+duplicate_gap_seconds = 1
+duplicate_phash_threshold = 2
 
 [events]
 # A gap longer than this between photos starts a new suggested event.

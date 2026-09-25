@@ -37,6 +37,13 @@ def save(path: Path, img: Image.Image, taken: str | None = None, model: str | No
     return path
 
 
+def add_close_call(inbox: Path) -> None:
+    """Two frames of the same scene, slightly shifted: a genuine near tie (not duplicates)."""
+    twin = scene(60)
+    save(inbox / "twins/IMG_3000.jpg", twin, "2026:07:06 10:00:00")
+    save(inbox / "twins/IMG_3001.jpg", Image.fromarray(np.roll(np.asarray(twin), 12, axis=1)), "2026:07:06 10:00:01")
+
+
 @pytest.fixture
 def sample_inbox(tmp_path: Path) -> Path:
     inbox = tmp_path / "inbox"
