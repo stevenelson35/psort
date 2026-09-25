@@ -26,8 +26,8 @@ def test_run_builds_library(psort, tmp_path, sample_inbox):
     out = psort("run").output
 
     assert "Ingest: 11 new, 1 exact duplicates" in out
-    assert "3 skipped" not in out  # Thumbs.db is ignored, not skipped
-    assert "2 skipped" in out  # .MOV and .txt
+    assert "1 skipped" in out  # notes.txt (Thumbs.db is ignored, not skipped)
+    assert "1 Live Photo clip(s) skipped" in out  # IMG_0009.MOV beside IMG_0009.HEIC
     assert library_files(tmp_path / "library") == {
         # Burst: sharp IMG_0002 is best; the other two are its alternates.
         "2026/2026-07-03/20260703_145634.jpg",
@@ -107,9 +107,10 @@ def test_verify(psort, tmp_path, sample_inbox):
     assert "safe to delete" in out
 
     out = psort("verify", "2026-phone-dump", expect=2).output
-    assert "IMG_0009.MOV" in out and "video (not supported)" in out
+    assert "IMG_0009.MOV" not in out  # a Live Photo clip: fine to delete, its photo is kept
     assert "notes.txt" in out
-    assert "2 of 13 files are NOT in the library" in out
+    assert "1 of 13 files are NOT in the library" in out
+    assert "Live Photo clip" in psort("verify", "2026-phone-dump", "--all", expect=2).output
 
     psort("verify", "../..", expect=1)
 

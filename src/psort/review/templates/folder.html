@@ -1,16 +1,23 @@
 {% extends "base.html" %}
-{% from "_macros.html" import card, post %}
+{% from "_macros.html" import card, post, video_card %}
 {% set when, event = pretty_folder(info.key) %}
 {% block title %}{{ when }}{% endblock %}
 {% block content %}
 <h1>{{ when }} <span class="event">{{ event }}</span></h1>
 <p class="row muted">
-  {{ info.moments }} moments · {{ info.photos }} photos
+  {{ info.moments }} moments · {{ info.photos }} photos{% if info.videos %} · 🎬 {{ info.videos }} video{{ "" if info.videos == 1 else "s" }}{% endif %}
   {% if info.day %}
     {{ post(url_for('reviewed', day=info.day), "✓ Reviewed" if info.reviewed else "Mark day reviewed",
             "done" if info.reviewed else "") }}
   {% endif %}
 </p>
-<p class="muted">Click a photo to see every shot in its moment and choose the best.</p>
-<div class="grid">{% for p in photos %}{{ card(p) }}{% endfor %}</div>
+{% if videos %}
+  <h2>🎬 {{ videos|length }} video{{ "" if videos|length == 1 else "s" }} from this day</h2>
+  <div class="grid videos">{% for v in videos %}{{ video_card(v) }}{% endfor %}</div>
+{% endif %}
+{% if photos %}
+  {% if videos %}<h2>Photos</h2>{% endif %}
+  <p class="muted">Click a photo to see every shot in its moment and choose the best.</p>
+  <div class="grid">{% for p in photos %}{{ card(p) }}{% endfor %}</div>
+{% endif %}
 {% endblock %}

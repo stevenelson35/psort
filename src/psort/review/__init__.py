@@ -14,6 +14,7 @@ from .. import actions
 from .. import export as export_mod
 from .. import events as events_mod
 from .. import faces as faces_mod
+from .. import videos as videos_mod
 from ..config import Config
 from ..dates import UNCERTAIN, sql_in
 from ..db import connect
@@ -63,6 +64,7 @@ def create_app(cfg: Config) -> Flask:
                 "close_calls": one("SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1"),
                 "undated": one(f"SELECT COUNT(*) FROM photos WHERE date_source IN {sql_in(UNCERTAIN)}"),
                 "tray": one("SELECT COUNT(*) FROM tray"),
+                "videos": one("SELECT COUNT(*) FROM videos WHERE library_path IS NOT NULL"),
                 "unnamed_groups": one("SELECT COUNT(DISTINCT cluster) FROM faces WHERE cluster IS NOT NULL"),
             },
         }
@@ -107,7 +109,11 @@ def create_app(cfg: Config) -> Flask:
                 ORDER BY p.taken_at, p.name""",
             (len(prefix), prefix),
         ).fetchall()
-        return render_template("folder.html", info=info, photos=photos)
+        videos = db().execute(
+            "SELECT * FROM videos WHERE substr(library_path, 1, ?) = ? ORDER BY taken_at, name",
+            (len(prefix), prefix),
+        ).fetchall()
+        return render_template("folder.html", info=info, photos=photos, videos=videos)
 
     @app.get("/moment/<moment_id>")
     def moment(moment_id):
@@ -134,6 +140,33 @@ def create_app(cfg: Config) -> Flask:
         for shots in moments.values():
             shots.sort(key=lambda r: (-r["is_best"], -r["score"]))
         return render_template("close_calls.html", moments=moments)
+
+    @app.get("/videos")
+    def videos():
+        rows = db().execute("SELECT * FROM videos WHERE library_path IS NOT NULL ORDER BY taken_at, name").fetchall()
+        by_folder = defaultdict(list)
+        for r in rows:
+            by_folder[folder_key(r["library_path"])].append(r)
+        return render_template("videos.html", by_folder=dict(sorted(by_folder.items(), reverse=True)),
+                               root=windows_path(cfg.videos))
+
+    @app.get("/poster/<sha>.jpg")
+    def video_poster(sha):
+        row = db().execute("SELECT library_path FROM videos WHERE sha256 = ?", (sha,)).fetchone()
+        if row is None or row["library_path"] is None:
+            abort(404)
+        out = videos_mod.poster(cfg, sha, row["library_path"])
+        if out is None:
+            abort(404)
+        return send_file(out, mimetype="image/jpeg", max_age=86400)
+
+    @app.get("/video/<sha>")
+    def video_file(sha):
+        row = db().execute("SELECT library_path FROM videos WHERE sha256 = ?", (sha,)).fetchone()
+        if row is None or row["library_path"] is None or not (cfg.videos / row["library_path"]).exists():
+            abort(404)
+        # conditional=True answers Range requests, so the browser can seek.
+        return send_file(cfg.videos / row["library_path"], conditional=True, max_age=0)
 
     @app.get("/undated")
     def undated():
@@ -302,6 +335,9 @@ def create_app(cfg: Config) -> Flask:
         return send_file(out, mimetype="image/jpeg", max_age=86400)
 
     app.jinja_env.globals["pretty_folder"] = pretty_folder
+    app.jinja_env.globals["video_path"] = lambda rel: windows_path(cfg.videos / rel)
+    app.jinja_env.globals["playable"] = lambda ext: ext.lower() in videos_mod.PLAYABLE
+    app.jinja_env.filters["duration"] = _duration
     return app
 
 
@@ -338,11 +374,16 @@ def folders(conn: sqlite3.Connection) -> list[dict]:
     """One entry per library folder (day or day+event), with counts."""
     reviewed = {r["day"] for r in conn.execute("SELECT day FROM reviewed")}
     acc: dict[str, dict] = {}
+    def entry(key):
+        return acc.setdefault(key, {"key": key, "photos": 0, "moments": set(), "close": set(), "videos": 0})
+
+    for r in conn.execute("SELECT library_path FROM videos WHERE library_path IS NOT NULL"):
+        entry(folder_key(r["library_path"]))["videos"] += 1
     for r in conn.execute(
         "SELECT library_path, moment_id, close_call FROM photos WHERE library_path IS NOT NULL ORDER BY taken_at"
     ):
         key = folder_key(r["library_path"])
-        f = acc.setdefault(key, {"key": key, "photos": 0, "moments": set(), "close": set()})
+        f = entry(key)
         f["photos"] += 1
         f["moments"].add(r["moment_id"])
         if r["close_call"]:
@@ -353,6 +394,7 @@ def folders(conn: sqlite3.Connection) -> list[dict]:
         out.append({
             "key": key, "year": "Undated" if key == "_undated" else key[:4], "day": day,
             "photos": f["photos"], "moments": len(f["moments"]), "close_calls": len(f["close"]),
+            "videos": f["videos"],
             "reviewed": day in reviewed,
         })
     return out
@@ -363,3 +405,10 @@ def _save_atomic(img: Image.Image, out: Path) -> None:
     partial = out.with_name(f"{out.name}.{secrets.token_hex(4)}.partial")  # unique per request thread
     img.save(partial, "JPEG", quality=82)
     os.replace(partial, out)
+
+
+def _duration(seconds) -> str:
+    if not seconds:
+        return ""
+    m, s = divmod(int(round(seconds)), 60)
+    return f"{m // 60}:{m % 60:02}:{s:02}" if m >= 60 else f"{m}:{s:02}"

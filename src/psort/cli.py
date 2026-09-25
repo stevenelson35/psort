@@ -51,6 +51,7 @@ def init(
     library: Annotated[Path, typer.Option(help="Where the curated library is built.")],
     outbox: Annotated[Path, typer.Option(help="Where exports for blog posts go.")],
     state_dir: Annotated[Path, typer.Option(help="psort's database and models (keep inside WSL).")] = DEFAULT_STATE_DIR,
+    videos: Annotated[Path | None, typer.Option(help="Video tree (default: videos/ beside the library).")] = None,
     face_model: Annotated[bool, typer.Option(help="Download the face detection + recognition models (~39 MB).")] = True,
     force: Annotated[bool, typer.Option(help="Overwrite an existing config.")] = False,
 ) -> None:
@@ -59,7 +60,8 @@ def init(
         typer.secho(f"{_config_path} already exists (use --force to overwrite).", fg="red", err=True)
         raise typer.Exit(1)
     inbox, library, outbox, state_dir = (p.expanduser().resolve() for p in (inbox, library, outbox, state_dir))
-    config_mod.write_default(_config_path, inbox, library, outbox, state_dir)
+    videos = videos.expanduser().resolve() if videos else None
+    config_mod.write_default(_config_path, inbox, library, outbox, state_dir, videos)
     cfg = config_mod.load(_config_path)
     connect(cfg.db_path).close()
     library.mkdir(parents=True, exist_ok=True)
@@ -177,6 +179,8 @@ def status() -> None:
         "Undated": f"SELECT COUNT(*) FROM photos WHERE date_source IN {sql_in(UNCERTAIN)}",
         "Screenshots": "SELECT COUNT(*) FROM photos WHERE is_screenshot = 1",
         "Not in library": "SELECT COUNT(*) FROM photos WHERE library_path IS NULL",
+        "Videos": "SELECT COUNT(*) FROM videos",
+        "Live Photo clips": "SELECT COUNT(*) FROM sources WHERE status = 'livephoto'",
         "Skipped files": "SELECT COUNT(*) FROM sources WHERE status = 'skipped'",
         "Unreadable": "SELECT COUNT(*) FROM sources WHERE status = 'error'",
     }
@@ -345,6 +349,9 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
     )
     if s.redated:
         typer.echo(f"Dated {s.redated} earlier undated photo(s) from their folder names")
+    if s.new_videos or s.live_clips or s.sidecars:
+        typer.echo(f"Videos: {s.new_videos} new, {s.live_clips} Live Photo clip(s) skipped, "
+                   f"{s.sidecars} camera preview/helper file(s) not needed")
 
 
 def _cluster(cfg: Config, conn: sqlite3.Connection) -> None:
@@ -367,6 +374,8 @@ def _curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool) -> None:
     s = curate(cfg, conn, dry_run=dry_run, log=typer.echo)
     prefix = "Would curate" if dry_run else "Curate"
     typer.echo(f"{prefix}: {s.copied} copied, {s.moved} moved, {s.unchanged} unchanged")
+    if s.videos_copied or s.videos_moved:
+        typer.echo(f"{prefix} videos: {s.videos_copied} copied, {s.videos_moved} moved → {cfg.videos}")
     if s.missing:
         typer.secho(
             f"{len(s.missing)} photos have no library copy and their inbox files are gone: "

@@ -27,6 +27,8 @@ class CurateStats:
     moved: int = 0
     unchanged: int = 0
     missing: list[str] = field(default_factory=list)  # names with no library copy and no inbox source
+    videos_copied: int = 0
+    videos_moved: int = 0
 
 
 def assign_names(conn: sqlite3.Connection) -> None:
@@ -148,6 +150,12 @@ def curate(
             conn.execute("UPDATE photos SET library_path = ? WHERE sha256 = ?", (target, sha))
             conn.commit()
 
+    # Videos follow the same folder names in their own tree, so an event rename moves both.
+    from . import videos as videos_mod
+
+    v = videos_mod.curate(cfg, conn, dry_run=dry_run, log=log)
+    stats.videos_copied, stats.videos_moved = v.copied, v.moved
+    stats.missing += v.missing or []
     return stats
 
 
@@ -180,6 +188,14 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str) -> list[VerifyResu
             results.append(VerifyResult(str(rel), False, "not ingested yet (run `psort run`)"))
         elif src["size"] != st.st_size or src["mtime"] != st.st_mtime:
             results.append(VerifyResult(str(rel), False, "changed since it was ingested (run `psort run`)"))
+        elif src["status"] in ("sidecar", "livephoto"):
+            results.append(VerifyResult(str(rel), True, src["reason"]))
+        elif src["status"] == "video":
+            video = conn.execute("SELECT library_path FROM videos WHERE sha256 = ?", (src["sha256"],)).fetchone()
+            if video and video["library_path"] and (cfg.videos / video["library_path"]).exists():
+                results.append(VerifyResult(str(rel), True, f"video: {video['library_path']}"))
+            else:
+                results.append(VerifyResult(str(rel), False, "video not copied yet (run `psort run`)"))
         elif src["status"] != "image":
             results.append(VerifyResult(str(rel), False, f"not in library: {src['reason']}"))
         else:
@@ -217,6 +233,7 @@ def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
                 "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "photos": photos,
                 "events": events,
+                "videos": [dict(r) for r in conn.execute("SELECT * FROM videos ORDER BY taken_at, name")],
                 "sources": sources,
             },
             indent=1,

@@ -25,3 +25,21 @@
     </figcaption>
   </figure>
 {%- endmacro %}
+
+
+{% macro video_card(v) -%}
+  <figure class="card video">
+    {% if playable(v.ext) %}
+      <video controls preload="none" poster="{{ url_for('video_poster', sha=v.sha256) }}"
+             src="{{ url_for('video_file', sha=v.sha256) }}"></video>
+    {% else %}
+      <img src="{{ url_for('video_poster', sha=v.sha256) }}" loading="lazy" alt="{{ v.name }}">
+    {% endif %}
+    <figcaption>
+      <span class="pill">🎬 {{ v.duration|duration or "video" }}</span>
+      <span class="name">{{ v.name }}{{ v.ext }}</span>
+      <div class="muted path" title="Open in File Explorer or a video player">{{ video_path(v.library_path) }}</div>
+      {% if not playable(v.ext) %}<div class="muted">This format won't play in the browser. Open it from the path above.</div>{% endif %}
+    </figcaption>
+  </figure>
+{%- endmacro %}

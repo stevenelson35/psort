@@ -29,6 +29,7 @@ class Config:
     library: Path
     outbox: Path
     state_dir: Path = DEFAULT_STATE_DIR
+    videos_dir: Path | None = None  # default: a videos/ folder beside the library
     burst_gap_seconds: float = 10.0
     phash_threshold: int = 10
     close_call_margin: float = 0.05
@@ -38,6 +39,10 @@ class Config:
     face_match_threshold: float = 0.45
     face_cluster_threshold: float = 0.5
     weights: Weights = field(default_factory=Weights)
+
+    @property
+    def videos(self) -> Path:
+        return self.videos_dir or self.library.parent / "videos"
 
     @property
     def db_path(self) -> Path:
@@ -74,6 +79,7 @@ def load(path: Path) -> Config:
             library=Path(paths["library"]).expanduser(),
             outbox=Path(paths["outbox"]).expanduser(),
             state_dir=Path(paths.get("state_dir", DEFAULT_STATE_DIR)).expanduser(),
+            videos_dir=Path(paths["videos"]).expanduser() if "videos" in paths else None,
             burst_gap_seconds=float(cluster.get("burst_gap_seconds", 10.0)),
             phash_threshold=int(cluster.get("phash_threshold", 10)),
             close_call_margin=float(cluster.get("close_call_margin", 0.05)),
@@ -88,7 +94,8 @@ def load(path: Path) -> Config:
         raise ConfigError(f"Invalid config {path}: {e}") from e
 
 
-def write_default(path: Path, inbox: Path, library: Path, outbox: Path, state_dir: Path) -> None:
+def write_default(path: Path, inbox: Path, library: Path, outbox: Path, state_dir: Path,
+                  videos: Path | None = None) -> None:
     # json.dumps produces valid TOML basic strings for paths.
     q = lambda p: json.dumps(str(p))  # noqa: E731
     w = Weights()
@@ -98,6 +105,8 @@ def write_default(path: Path, inbox: Path, library: Path, outbox: Path, state_di
 inbox = {q(inbox)}
 library = {q(library)}
 outbox = {q(outbox)}
+# Videos get the same year/day/event folders as the library, in their own tree.
+videos = {q(videos or library.parent / "videos")}
 state_dir = {q(state_dir)}
 
 [cluster]

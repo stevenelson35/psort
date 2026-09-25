@@ -31,13 +31,26 @@ CREATE TABLE IF NOT EXISTS photos (
     first_seen     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS videos (
+    sha256       TEXT PRIMARY KEY,
+    ext          TEXT NOT NULL,
+    taken_at     TEXT NOT NULL,
+    date_source  TEXT NOT NULL,            -- meta | filename | folder | folder-month | mtime | user
+    duration     REAL,                     -- seconds
+    width        INTEGER,
+    height       INTEGER,
+    name         TEXT UNIQUE,
+    library_path TEXT,                     -- relative to the videos root
+    first_seen   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Every file seen in the inbox, including duplicates and skipped files.
 CREATE TABLE IF NOT EXISTS sources (
     path    TEXT PRIMARY KEY,              -- relative to inbox
     batch   TEXT NOT NULL,
     size    INTEGER NOT NULL,
     mtime   REAL NOT NULL,
-    status  TEXT NOT NULL,                 -- image | skipped | error
+    status  TEXT NOT NULL,                 -- image | video | livephoto | sidecar | skipped | error
     reason  TEXT,
     sha256  TEXT REFERENCES photos(sha256)
 );

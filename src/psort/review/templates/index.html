@@ -14,6 +14,7 @@
         <td class="event">{{ event }}</td>
         <td class="num">{{ f.moments }} moments</td>
         <td class="num muted">{{ f.photos }} photos</td>
+        <td>{% if f.videos %}<span class="pill">🎬 {{ f.videos }}</span>{% endif %}</td>
         <td>{% if f.close_calls %}<span class="pill warn">{{ f.close_calls }} close</span>{% endif %}</td>
       </tr>
     {% endfor %}

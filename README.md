@@ -36,6 +36,8 @@ uv run psort faces crops                          # thumbnails to browse in File
 uv run psort faces label Steve --group 4
 ```
 
+Videos are copied to `videos/` beside the library, using the same folder names, and show up on each day's page in the review UI.
+
 psort never writes to the inbox. Delete a batch yourself once `verify` says it's safe.
 
 ## Tests

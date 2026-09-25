@@ -10,7 +10,7 @@ psort is a local photo curation tool. It takes the chaotic, date-dumped folders 
 4. **No cost, no sudo.** Python 3.12 and pip-installable libraries only. Everything runs locally, with no cloud APIs.
 5. **Idempotent.** Re-running any command is safe. Photos are identified by their **content**, not their path, so moving or renaming inbox folders doesn't cause reprocessing, and your review decisions survive re-runs.
 6. **The blog stays unchanged in Phase 1.** The existing `blogupdate.html` → Cloudinary → GitHub Action → Turbify flow keeps working exactly as it does today (§8).
-7. **No videos.** Video files, including Live Photo `.mov` companions, are skipped. They're always *reported*, so nothing is silently lost before you delete an inbox batch.
+7. **Videos are kept, not curated.** Videos are copied into a parallel `videos/` tree that uses the same folder names as the library (§5.8). They get no best-shot picking, faces or export. iPhone Live Photo clips are skipped, since their still photo is kept. Anything skipped is always *reported*, so nothing is silently lost before you delete an inbox batch.
 8. **No spaces in names.** Every folder and file psort creates uses lowercase letters, digits, `-` and `_` only. Event names you type are converted: "Birthday Party" → `birthday-party`.
 
 ## 2. Folders
@@ -19,6 +19,7 @@ psort is a local photo curation tool. It takes the chaotic, date-dumped folders 
 |---|---|---|---|
 | **Inbox** | `/mnt/d/psort-inbox/` (USB or Windows drive) | Never | Batches you drop in as subfolders, e.g. `2019-phone-dump/`, `sarah-iphone-2024/` |
 | **Library** | `/mnt/c/Users/steve/OneDrive/Pictures/psort-library/` | Yes | The curated master library (§5.4) |
+| **Videos** | `/mnt/c/Users/steve/OneDrive/photos/psort/videos/` (beside the library) | Yes | Videos, in the same year/day/event folders as the library (§5.8) |
 | **Outbox** | `/mnt/c/Users/steve/Pictures/psort-outbox/` | Yes | Web-ready exports for blog posts, one folder per post |
 | **State** | `~/.local/share/psort/` (inside WSL) | Yes | SQLite database and thumbnail/hash cache |
 
@@ -164,6 +165,27 @@ psort-library/
   - now: "who's in this photo" in the manifest
   - planned: people filters in the review UI, a warning before publishing a photo that shows your daughter, and optionally favoring shots where family faces are sharp
 - Dogs' faces are often detected too, so pets can be named the same way.
+
+### 5.8 Videos
+
+- **Formats:** phone and camera formats, including `.mp4 .mov .m4v .3gp .avi .mpg .mpeg .mts .m2ts .mod .tod .vob .wmv .mkv .webm`.
+- **Copying and layout:**
+  - Videos are copied and verified like photos, and exact duplicates are skipped.
+  - They're filed in `videos/` under the **same folder names** the library uses for that date: `YYYY/YYYY-MM-DD[_event]/`, `YYYY-MM_unknown-day/` or `_undated/`.
+  - Naming an event renames the folder in both trees.
+- **Dates**, from the first of these that works:
+  1. the MP4/MOV creation time (stored in UTC, shown in local time)
+  2. the filename
+  3. the folder name
+  4. the file's modified time
+- **Live Photo clips:** a `.mov`/`.mp4` of 5 seconds or less, sitting beside a same-named HEIC or JPEG, is recorded as a Live Photo clip and not copied. `verify` treats it as safe to delete, because the photo is kept.
+- **Helper files:** `.THM` (camera video preview) and `.AAE` (iPhone edit settings) files are recorded as not needed, and `verify` treats them as safe to delete.
+- **Review UI:**
+  - Each day or event page has a 🎬 section with a still frame, the video's length, and its Windows path.
+  - MP4, MOV and WebM files play in the page.
+  - A **Videos** page lists every video by folder.
+  - The Library page marks folders that contain videos.
+- Videos picked up before this feature existed (previously "unsupported") are ingested on the next run.
 
 ## 6. Review UI
 

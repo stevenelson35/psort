@@ -69,3 +69,6 @@ dt { color: var(--muted); } dd { margin: 0; word-break: break-all; }
 .people-list { padding-left: 1.2rem; }
 code { background: var(--surface-2); padding: 0 .3rem; border-radius: 4px; }
 nav.top .theme { margin-left: auto; padding: .15rem .55rem; }
+.card.video video, .card.video img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--photo-bg); }
+.card .path { font-size: .75rem; word-break: break-all; }
+.grid.videos { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }

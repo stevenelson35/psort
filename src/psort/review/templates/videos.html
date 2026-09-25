@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "_macros.html" import video_card %}
+{% block title %}Videos{% endblock %}
+{% block content %}
+<h1>Videos</h1>
+<p class="muted">Every video, filed under <code>{{ root }}</code> in folders named the same as the photo library.
+  Each day's page shows its videos too.</p>
+{% if not by_folder %}<p>No videos yet.</p>{% endif %}
+{% for key, vids in by_folder.items() %}
+  {% set when, event = pretty_folder(key) %}
+  <h2><a href="{{ url_for('folder', key=key) }}">{{ when }}</a> <span class="event">{{ event }}</span></h2>
+  <div class="grid videos">{% for v in vids %}{{ video_card(v) }}{% endfor %}</div>
+{% endfor %}
+{% endblock %}
