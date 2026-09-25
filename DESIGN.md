@@ -175,9 +175,10 @@ psort-library/
   - Naming an event renames the folder in both trees.
 - **Dates**, from the first of these that works:
   1. the MP4/MOV creation time (stored in UTC, shown in local time)
-  2. the filename
-  3. the folder name
-  4. the file's modified time
+  2. the date inside the video's `.THM` companion file, which older cameras like your Sony write
+  3. the filename
+  4. the folder name
+  5. the file's modified time
 - **Live Photo clips:** a `.mov`/`.mp4` of 5 seconds or less, sitting beside a same-named HEIC or JPEG, is recorded as a Live Photo clip and not copied. `verify` treats it as safe to delete, because the photo is kept.
 - **Helper files:** `.THM` (camera video preview) and `.AAE` (iPhone edit settings) files are recorded as not needed, and `verify` treats them as safe to delete.
 - **Review UI:**

@@ -124,3 +124,30 @@ def test_review_ui_shows_videos(psort, tmp_path, sample_inbox):
     assert "won't play in the browser" in month and "<video" not in month
     listing = client.get("/videos").get_data(as_text=True)
     assert listing.count('class="card video"') == 2
+
+
+def test_thm_companion_supplies_the_date(psort, tmp_path, sample_inbox):
+    from PIL import Image
+
+    fargo = sample_inbox / "2015-05-fargo"
+    make_video(fargo / "MOV05714.MPG", fps=25, fourcc="PIM1")
+    exif = Image.Exif()
+    exif.get_ifd(0x8769)[36867] = "2015:05:09 14:43:23"
+    Image.new("RGB", (160, 120)).save(fargo / "MOV05714.THM", "JPEG", exif=exif.tobytes())
+    psort("run")
+    assert "2015/2015-05-09/20150509_144323.mpg" in video_files(tmp_path / "videos")
+
+
+def test_thm_date_fixes_videos_already_filed_by_month(psort, tmp_path, sample_inbox):
+    from PIL import Image
+
+    fargo = sample_inbox / "2015-05-fargo"
+    make_video(fargo / "MOV05714.MPG", fps=25, fourcc="PIM1")
+    psort("run")
+    assert "2015/2015-05_unknown-day/20150501_120000.mpg" in video_files(tmp_path / "videos")
+    exif = Image.Exif()
+    exif.get_ifd(0x8769)[36867] = "2015:05:09 14:43:23"
+    Image.new("RGB", (160, 120)).save(fargo / "MOV05714.THM", "JPEG", exif=exif.tobytes())
+    psort("run")
+    files = video_files(tmp_path / "videos")
+    assert "2015/2015-05-09/20150509_144323.mpg" in files and not any("unknown-day" in f for f in files)

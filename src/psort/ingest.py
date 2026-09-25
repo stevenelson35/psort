@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from PIL import Image
+
 from . import dates
 from .config import Config
 from . import videos as videos_mod
@@ -53,6 +55,36 @@ def _taken_at(path: Path, rel: Path, exif_value: object, mtime: float) -> tuple[
     if found := dates.from_folders(str(rel)):
         return found
     return datetime.fromtimestamp(mtime).replace(microsecond=0), "mtime"
+
+
+def thm_date(video: Path) -> datetime | None:
+    """Older cameras save a small JPEG (.THM) beside each video, with the date in its EXIF."""
+    for ext in (".THM", ".thm"):
+        thm = video.with_suffix(ext)
+        if thm.exists():
+            try:
+                with Image.open(thm) as im:
+                    exif = im.getexif()
+                    return dates.parse_exif_datetime(exif.get_ifd(0x8769).get(36867) or exif.get(306))
+            except OSError:
+                return None
+    return None
+
+
+def redate_videos_from_thm(cfg: Config, conn: sqlite3.Connection) -> int:
+    """Videos dated only roughly (folder or file time) whose .THM companion has the real date."""
+    changed = 0
+    rows = conn.execute(
+        f"""SELECT v.sha256, (SELECT MIN(s.path) FROM sources s WHERE s.sha256 = v.sha256) AS path
+            FROM videos v WHERE v.date_source IN {dates.sql_in(dates.NO_TIME)}"""
+    ).fetchall()
+    for r in rows:
+        if r["path"] and (dt := thm_date(cfg.inbox / r["path"])):
+            conn.execute("UPDATE videos SET taken_at = ?, date_source = 'meta', name = NULL WHERE sha256 = ?",
+                         (dt.isoformat(), r["sha256"]))
+            changed += 1
+    conn.commit()
+    return changed
 
 
 def redate_from_folders(conn: sqlite3.Connection) -> int:
@@ -141,6 +173,7 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
 
     conn.commit()
     stats.redated = redate_from_folders(conn)
+    redate_videos_from_thm(cfg, conn)
     return stats
 
 
@@ -173,8 +206,8 @@ def _ingest_video(conn, path, rel, st, ext, sibling_names, stats) -> None:
     if conn.execute("SELECT 1 FROM videos WHERE sha256 = ?", (sha,)).fetchone():
         stats.duplicates += 1
     else:
-        if info.created:
-            taken, source = info.created, "meta"
+        if created := info.created or thm_date(path):
+            taken, source = created, "meta"
         else:
             taken, source = _taken_at(path, rel, None, st.st_mtime)
         conn.execute(
