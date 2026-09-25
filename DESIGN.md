@@ -152,15 +152,23 @@ psort-library/
 
 ## 6. Review UI
 
-- **`psort review`** starts a local Flask app at `http://localhost:5000`. It's only reachable from your own PC and has no login.
-- **Browse:** Year → day or event → a grid of moments. Close calls are listed first. Each moment shows its best shot, with a count badge for alternates.
-- **Actions:**
-  - choose a different best shot
-  - fix the date on an uncertain photo
-  - add tags
-  - mark a day or moment as reviewed
-  - **add photos to a post**, which puts them in the export tray (§7)
-- Overrides are stored per photo content hash, so they survive re-runs.
+- **`psort review`** starts a local Flask app at `http://localhost:5000`. It listens on 127.0.0.1 only and has no login. It refuses requests whose Host isn't `localhost`/`127.0.0.1`, and every change needs a token that's created fresh each time the app starts. Together these stop a web page elsewhere from driving it.
+- **Pages:**
+  - **Library:** years → days and events, with moment counts, close calls, and a ✓ for reviewed days.
+  - **Day or event:** a grid of best shots, with badges for shot count, close call, in tray, people and tags. There's a "Mark day reviewed" button.
+  - **Moment:** every shot with its score breakdown, and:
+    - **Make this the best**, which sticks, plus "let psort pick again"
+    - add to the post tray
+    - tags
+    - fix date
+  - **Close calls:** each near-tie moment side by side, with a "Pick this" button per shot.
+  - **Events:** suggested events with name and "through" fields, plus unname.
+  - **Faces:** unnamed groups as face thumbnails. Untick any face that doesn't belong, then name the whole group or just the ticked faces. Each person has a page with a "Not <name>" button for mistakes.
+  - **Undated:** enter the real date, and the photo moves into its day folder and gets a name from that date.
+  - **Post tray:** photos picked for the next post, for export (§7).
+- Every decision updates the library right away: files move, folders are renamed, and the manifest is rewritten.
+- **Face rejections:** unticking a face or clicking "Not <name>" is remembered. That face is never auto-matched to that person again, unless you name it that person yourself.
+- **Thumbnails** (320px and 1280px, including HEIC converted to JPEG) and face crops are cached in the state folder. The files are named by photo content, so they never go stale.
 
 ## 7. Export for a Post
 

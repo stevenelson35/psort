@@ -90,16 +90,28 @@ def assign(cfg: Config, conn: sqlite3.Connection) -> None:
     person = np.where(user, user_person, -1)
     similarity = np.full(len(rows), np.nan)
 
-    # Auto-label: each face takes the person of its most similar user-named face, if close enough.
+    # Auto-label: each face takes the person whose user-named faces it most resembles, if close
+    # enough, skipping any person you've said it isn't.
     todo = np.flatnonzero(~user)
     if user.any() and len(todo):
         named = np.flatnonzero(user)
+        persons = np.unique(user_person[named])
+        column = {int(p): j for j, p in enumerate(persons)}
+        row_of = {int(fid): i for i, fid in enumerate(ids[todo])}
+        rejected = [(row_of[r["face_id"]], column[r["person_id"]]) for r in conn.execute(
+            "SELECT face_id, person_id FROM face_rejections")
+            if r["face_id"] in row_of and r["person_id"] in column]
         for off, sims in _similarities(emb[todo], emb[named]):
-            best = sims.argmax(axis=1)
-            best_sim = sims[np.arange(len(best)), best]
+            # Best similarity to each person = max over that person's named faces.
+            per_person = np.stack([sims[:, user_person[named] == p].max(axis=1) for p in persons], axis=1)
+            for i, j in rejected:
+                if off <= i < off + len(per_person):
+                    per_person[i - off, j] = -np.inf
+            best = per_person.argmax(axis=1)
+            best_sim = per_person[np.arange(len(best)), best]
             chunk = todo[off : off + len(best)]
             hit = best_sim >= cfg.face_match_threshold
-            person[chunk[hit]] = user_person[named[best[hit]]]
+            person[chunk[hit]] = persons[best[hit]]
             similarity[chunk[hit]] = best_sim[hit]
 
     # Group the still-unnamed faces: link each to its nearest look-alikes above the cluster
@@ -141,8 +153,9 @@ class FaceError(Exception):
 
 
 def label(cfg: Config, conn: sqlite3.Connection, name: str, cluster: int | None = None,
-          face_ids: list[int] | None = None) -> int:
-    """Name a whole unnamed cluster and/or specific faces. Returns faces labeled."""
+          face_ids: list[int] | None = None, rejected_ids: list[int] | None = None) -> int:
+    """Name a whole unnamed cluster and/or specific faces. `rejected_ids` are faces you've said are
+    NOT this person; they'll never be auto-matched to it. Returns faces labeled."""
     name = name.strip()
     if not name:
         raise FaceError("Name can't be empty")
@@ -151,14 +164,17 @@ def label(cfg: Config, conn: sqlite3.Connection, name: str, cluster: int | None 
         ids += [r["id"] for r in conn.execute("SELECT id FROM faces WHERE cluster = ?", (cluster,))]
         if not ids:
             raise FaceError(f"No unnamed group {cluster}. Run `psort faces list`.")
-    known = {r["id"] for r in conn.execute(
-        f"SELECT id FROM faces WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else set()
-    if missing := set(ids) - known:
-        raise FaceError(f"No face(s) {sorted(missing)}")
+    _check_faces(conn, ids + list(rejected_ids or []))
     conn.execute("INSERT OR IGNORE INTO people (name) VALUES (?)", (name,))
     pid = conn.execute("SELECT id FROM people WHERE name = ?", (name,)).fetchone()["id"]
     conn.executemany(
         "UPDATE faces SET person_id = ?, label_source = 'user', cluster = NULL WHERE id = ?", [(pid, i) for i in ids]
+    )
+    # Naming a face explicitly overrides an earlier "not this person".
+    conn.executemany("DELETE FROM face_rejections WHERE face_id = ? AND person_id = ?", [(i, pid) for i in ids])
+    conn.executemany(
+        "INSERT OR IGNORE INTO face_rejections (face_id, person_id) VALUES (?, ?)",
+        [(i, pid) for i in rejected_ids or []],
     )
     conn.commit()
     assign(cfg, conn)
@@ -166,12 +182,30 @@ def label(cfg: Config, conn: sqlite3.Connection, name: str, cluster: int | None 
 
 
 def unlabel(cfg: Config, conn: sqlite3.Connection, face_ids: list[int]) -> None:
-    conn.executemany(
-        "UPDATE faces SET person_id = NULL, label_source = NULL WHERE id = ?", [(i,) for i in face_ids]
+    """"Not this person": remove the name and never auto-match these faces to that person again."""
+    _check_faces(conn, face_ids)
+    marks = f"({','.join('?' * len(face_ids))})"
+    conn.execute(
+        f"""INSERT OR IGNORE INTO face_rejections (face_id, person_id)
+            SELECT id, person_id FROM faces WHERE id IN {marks} AND person_id IS NOT NULL""",
+        face_ids,
     )
-    conn.execute("DELETE FROM people WHERE id NOT IN (SELECT DISTINCT person_id FROM faces WHERE person_id IS NOT NULL)")
+    conn.execute(f"UPDATE faces SET person_id = NULL, label_source = NULL WHERE id IN {marks}", face_ids)
     conn.commit()
     assign(cfg, conn)
+    # A person left with no named faces is gone (their auto matches were just cleared by assign).
+    orphans = "SELECT id FROM people WHERE id NOT IN (SELECT person_id FROM faces WHERE person_id IS NOT NULL)"
+    conn.execute(f"DELETE FROM face_rejections WHERE person_id IN ({orphans})")
+    conn.execute(f"DELETE FROM people WHERE id IN ({orphans})")
+    conn.commit()
+
+
+def _check_faces(conn: sqlite3.Connection, ids: list[int]) -> None:
+    if not ids:
+        return
+    known = {r["id"] for r in conn.execute(f"SELECT id FROM faces WHERE id IN ({','.join('?' * len(ids))})", ids)}
+    if missing := set(ids) - known:
+        raise FaceError(f"No face(s) {sorted(missing)}")
 
 
 def summary(conn: sqlite3.Connection, top: int = 20):
@@ -214,21 +248,29 @@ def write_crops(cfg: Config, conn: sqlite3.Connection, per_group: int = 12, top:
     for folder, faces in jobs:
         folder.mkdir(parents=True, exist_ok=True)
         for f in faces:
-            path = cfg.library / f["library_path"]
-            if not path.exists():
-                continue
-            small, _, _, _ = load_small(path)
-            W, H = small.size
-            pad = 0.25
-            box = (
-                max(0, int((f["x"] - f["w"] * pad) * W)), max(0, int((f["y"] - f["h"] * pad) * H)),
-                min(W, int((f["x"] + f["w"] * (1 + pad)) * W)), min(H, int((f["y"] + f["h"] * (1 + pad)) * H)),
-            )
-            crop = small.crop(box)
-            crop.thumbnail((160, 160), Image.LANCZOS)
-            suffix = f"_{f['label_source']}" if f["label_source"] else ""
-            crop.save(folder / f"face-{f['id']}{suffix}.jpg", quality=85)
+            crop = crop_face(cfg, f)
+            if crop is not None:
+                suffix = f"_{f['label_source']}" if f["label_source"] else ""
+                crop.save(folder / f"face-{f['id']}{suffix}.jpg", quality=85)
     return out
+
+
+def crop_face(cfg: Config, face: sqlite3.Row, size: int = 160) -> Image.Image | None:
+    """A padded square-ish thumbnail of one face, from its library photo. `face` needs the faces
+    columns plus library_path."""
+    path = cfg.library / face["library_path"]
+    if not path.exists():
+        return None
+    small, _, _, _ = load_small(path)
+    W, H = small.size
+    pad = 0.25
+    box = (
+        max(0, int((face["x"] - face["w"] * pad) * W)), max(0, int((face["y"] - face["h"] * pad) * H)),
+        min(W, int((face["x"] + face["w"] * (1 + pad)) * W)), min(H, int((face["y"] + face["h"] * (1 + pad)) * H)),
+    )
+    crop = small.crop(box)
+    crop.thumbnail((size, size), Image.LANCZOS)
+    return crop
 
 
 def windows_path(path: Path) -> str:

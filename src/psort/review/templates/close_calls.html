@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post %}
+{% block title %}Close calls{% endblock %}
+{% block content %}
+<h1>Close calls</h1>
+<p class="muted">psort couldn't clearly pick a winner in these moments. Choose one, or leave psort's pick (★).</p>
+{% if not moments %}<p>No close calls. 🎉</p>{% endif %}
+{% for moment_id, shots in moments.items() %}
+  <div class="strip">
+    {% for s in shots %}
+      <figure class="card{% if s.is_best %} best{% endif %}">
+        <a href="{{ url_for('thumb', sha=s.sha256, size=1280) }}" target="_blank">
+          <img src="{{ url_for('thumb', sha=s.sha256, size=320) }}" loading="lazy" alt="{{ s.name }}"></a>
+        <figcaption>
+          {% if s.is_best %}<span class="pill ok">★ psort's pick</span>{% endif %}
+          {{ post(url_for('best', sha=s.sha256), "Pick this") }}
+        </figcaption>
+      </figure>
+    {% endfor %}
+    <a class="more" href="{{ url_for('moment', moment_id=moment_id) }}">details →</a>
+  </div>
+{% endfor %}
+{% endblock %}

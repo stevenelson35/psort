@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post %}
+{% block title %}{{ shots[0].name }}{% endblock %}
+{% block content %}
+{% set when, event = pretty_folder(folder_key) %}
+<p><a href="{{ url_for('folder', key=folder_key) }}">← {{ when }} {{ event }}</a></p>
+<h1>{% if shots|length > 1 %}Moment: {{ shots|length }} shots{% else %}{{ shots[0].name }}{% endif %}</h1>
+{% if shots|length > 1 %}
+  <p class="muted">
+    {% if shots[0].user_best %}You picked the best shot. {{ post(url_for('auto', moment_id=moment_id), "Let psort pick again") }}
+    {% else %}psort picked the best shot automatically{% if shots[0].close_call %}, but it was a close call{% endif %}.{% endif %}
+  </p>
+{% endif %}
+<div class="shots">
+{% for s in shots %}
+  <section class="shot{% if s.is_best %} best{% endif %}">
+    <a href="{{ url_for('thumb', sha=s.sha256, size=1280) }}" target="_blank">
+      <img src="{{ url_for('thumb', sha=s.sha256, size=1280) }}" loading="lazy" alt="{{ s.name }}">
+    </a>
+    <div class="meta">
+      <strong>{{ s.name }}</strong>
+      {% if s.is_best %}<span class="pill ok">★ best</span>{% endif %}
+      {% if shots|length > 1 and not s.is_best %}{{ post(url_for('best', sha=s.sha256), "Make this the best") }}{% endif %}
+      {{ post(url_for('tray_toggle', sha=s.sha256), "Remove from post tray" if s.in_tray else "Add to post tray",
+              "ok" if s.in_tray else "") }}
+      <dl>
+        <dt>Score</dt><dd>{{ "%.3f"|format(s.score or 0) }} (sharpness {{ s.sharpness|round|int }},
+          exposure {{ "%.2f"|format(s.exposure) }}{% if s.faces is not none %}, {{ s.faces }} face{{ "" if s.faces == 1 else "s" }}{% endif %})</dd>
+        <dt>Taken</dt><dd>{{ s.taken_at.replace("T", " ") }} <span class="muted">({{ s.date_source }})</span></dd>
+        {% if s.camera %}<dt>Camera</dt><dd>{{ s.camera }}</dd>{% endif %}
+        <dt>Size</dt><dd>{{ s.width }} × {{ s.height }}</dd>
+        {% if s.people %}<dt>People</dt><dd>{{ s.people }}</dd>{% endif %}
+        <dt>File</dt><dd class="muted">{{ s.library_path }}</dd>
+      </dl>
+      <form method="post" action="{{ url_for('tags', sha=s.sha256) }}" class="row">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <input name="tags" value="{{ s.tags or '' }}" placeholder="tags, comma separated">
+        <button>Save tags</button>
+      </form>
+      <form method="post" action="{{ url_for('date', sha=s.sha256) }}" class="row">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <input type="datetime-local" name="when" value="{{ s.taken_at[:16] }}">
+        <button>Fix date</button>
+      </form>
+    </div>
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

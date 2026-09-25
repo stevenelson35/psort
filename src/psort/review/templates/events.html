@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post %}
+{% block title %}Events{% endblock %}
+{% block content %}
+<h1>Events</h1>
+<p class="muted">psort starts a new suggested event after a long gap in shooting. Name one to rename its day folders,
+  e.g. <code>2026-07-03_birthday-party</code>. For a trip, pick the last event in "through".</p>
+<table class="events">
+  <tr><th>Starts</th><th>Ends</th><th class="num">Photos</th><th>Name</th></tr>
+  {% for e in events %}
+    <tr>
+      <td>{{ e.start[:16].replace("T", " ") }}</td>
+      <td>{{ e.end[:16].replace("T", " ") if e.end != e.start else "" }}</td>
+      <td class="num">{{ e.photos }}</td>
+      <td>
+        {% if e.slug %}
+          <strong>{{ e.slug }}</strong> {{ post(url_for('events_unname'), "Unname", fields={"name": e.slug}) }}
+        {% else %}
+          <form method="post" action="{{ url_for('events_name') }}" class="row">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="event" value="{{ e.id }}">
+            <input name="name" placeholder="e.g. birthday party" required>
+            <select name="through" title="Through (for multi-day events)">
+              <option value="">just this one</option>
+              {% for later in events if later.start > e.start %}{% if loop.index <= 15 %}
+                <option value="{{ later.id }}">through {{ later.start[:10] }} {{ later.start[11:16] }}</option>
+              {% endif %}{% endfor %}
+            </select>
+            <button>Name</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+</table>
+{% endblock %}

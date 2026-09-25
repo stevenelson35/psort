@@ -66,6 +66,31 @@ CREATE TABLE IF NOT EXISTS faces (
     cluster       INTEGER                  -- unnamed-face group: smallest face id in the group
 );
 
+-- "This face is not that person": auto-matching never re-applies a rejected name.
+CREATE TABLE IF NOT EXISTS face_rejections (
+    face_id    INTEGER NOT NULL REFERENCES faces(id),
+    person_id  INTEGER NOT NULL REFERENCES people(id),
+    PRIMARY KEY (face_id, person_id)
+);
+
+CREATE TABLE IF NOT EXISTS tags (
+    sha256  TEXT NOT NULL REFERENCES photos(sha256),
+    tag     TEXT NOT NULL,
+    PRIMARY KEY (sha256, tag)
+);
+
+-- Photos picked for the next blog post (exported in the next stage).
+CREATE TABLE IF NOT EXISTS tray (
+    sha256    TEXT PRIMARY KEY REFERENCES photos(sha256),
+    added_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Days you've finished reviewing, 'YYYY-MM-DD'.
+CREATE TABLE IF NOT EXISTS reviewed (
+    day          TEXT PRIMARY KEY,
+    reviewed_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS sources_sha ON sources(sha256);
 CREATE INDEX IF NOT EXISTS photos_moment ON photos(moment_id);
 CREATE INDEX IF NOT EXISTS faces_sha ON faces(sha256);

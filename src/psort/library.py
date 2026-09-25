@@ -184,8 +184,11 @@ def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
         "SELECT DISTINCT f.sha256, p.name FROM faces f JOIN people p ON p.id = f.person_id ORDER BY p.name"
     ):
         people.setdefault(r["sha256"], []).append(r["name"])
+    tags = {}
+    for r in conn.execute("SELECT sha256, tag FROM tags ORDER BY tag"):
+        tags.setdefault(r["sha256"], []).append(r["tag"])
     photos = [
-        {**dict(r), "people": people.get(r["sha256"], [])}
+        {**dict(r), "people": people.get(r["sha256"], []), "tags": tags.get(r["sha256"], [])}
         for r in conn.execute("SELECT * FROM photos ORDER BY taken_at, name")
     ]
     events = [dict(r) for r in named_ranges(conn)]

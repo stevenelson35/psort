@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Library</h1>
+<p class="muted">{{ stats.photos }} photos in {{ stats.moments }} moments.</p>
+{% if not by_year %}<p>Nothing curated yet. Run <code>psort run</code>.</p>{% endif %}
+{% for year, folders in by_year.items() %}
+  <h2>{{ year }}</h2>
+  <table class="folders">
+    {% for f in folders %}
+      {% set when, event = pretty_folder(f.key) %}
+      <tr>
+        <td>{% if f.reviewed %}<span class="done" title="Reviewed">✓</span>{% endif %}</td>
+        <td><a href="{{ url_for('folder', key=f.key) }}">{{ when }}</a></td>
+        <td class="event">{{ event }}</td>
+        <td class="num">{{ f.moments }} moments</td>
+        <td class="num muted">{{ f.photos }} photos</td>
+        <td>{% if f.close_calls %}<span class="pill warn">{{ f.close_calls }} close</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+  </table>
+{% endfor %}
+{% endblock %}

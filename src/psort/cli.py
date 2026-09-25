@@ -131,6 +131,16 @@ def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; sho
 
 
 @app.command()
+def review(port: Annotated[int, typer.Option(help="Port on 127.0.0.1.")] = 5000) -> None:
+    """Open the review UI in your browser at http://localhost:<port>."""
+    from .review import create_app
+
+    cfg, _ = _open()
+    typer.echo(f"psort review running at http://localhost:{port}  (Ctrl+C to stop)")
+    create_app(cfg).run(host="127.0.0.1", port=port, threaded=True)
+
+
+@app.command()
 def status() -> None:
     """Library totals."""
     cfg, conn = _open()

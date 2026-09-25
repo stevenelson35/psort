@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card, post %}
+{% block title %}Post tray{% endblock %}
+{% block content %}
+<h1>Post tray</h1>
+<p class="muted">Photos you've picked for the next blog post. Exporting them for <code>blogupdate.html</code> comes in the next update.</p>
+{% if not photos %}<p>Empty. Use "Add to post tray" on any photo.</p>{% endif %}
+<div class="grid">
+{% for p in photos %}
+  <div>{{ card(p) }}{{ post(url_for('tray_toggle', sha=p.sha256), "Remove") }}</div>
+{% endfor %}
+</div>
+{% endblock %}

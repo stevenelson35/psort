@@ -98,6 +98,26 @@ def test_unlabel_returns_faces_to_groups(conn, cfg):
     assert len(clusters(conn)) == 1
 
 
+def test_rejections_stick(conn, cfg):
+    truth = add_faces(conn, {"a": 4})
+    assign(cfg, conn)
+    ids = sorted(truth)
+    label(cfg, conn, "Alice", face_ids=ids[:1])
+    assert conn.execute("SELECT COUNT(*) FROM faces WHERE label_source = 'auto'").fetchone()[0] == 3
+
+    # "Not Alice" on an auto match: it stays un-matched even after re-assigning.
+    unlabel(cfg, conn, [ids[3]])
+    assign(cfg, conn)
+    row = conn.execute("SELECT person_id FROM faces WHERE id = ?", (ids[3],)).fetchone()
+    assert row["person_id"] is None
+    assert conn.execute("SELECT COUNT(*) FROM people").fetchone()[0] == 1  # Alice still has her named face
+
+    # Naming it Alice explicitly overrides the rejection.
+    label(cfg, conn, "Alice", face_ids=[ids[3]])
+    row = conn.execute("SELECT label_source FROM faces WHERE id = ?", (ids[3],)).fetchone()
+    assert row["label_source"] == "user"
+
+
 def test_label_errors(conn, cfg):
     add_faces(conn, {"a": 2})
     assign(cfg, conn)

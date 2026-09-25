@@ -1,0 +1,25 @@
+{# A POST button carrying the CSRF token and a return address. #}
+{% macro post(action, label, cls="", fields={}) -%}
+  <form method="post" action="{{ action }}" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+    {% for k, v in fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <button class="{{ cls }}">{{ label }}</button>
+  </form>
+{%- endmacro %}
+
+{% macro card(p, link=true) -%}
+  <figure class="card{% if p.close_call %} close{% endif %}">
+    {% if link %}<a href="{{ url_for('moment', moment_id=p.moment_id) }}">{% endif %}
+      <img src="{{ url_for('thumb', sha=p.sha256, size=320) }}" loading="lazy" alt="{{ p.name }}">
+    {% if link %}</a>{% endif %}
+    <figcaption>
+      <span class="name">{{ p.name }}</span>
+      {% if p.shots > 1 %}<span class="pill">{{ p.shots }} shots</span>{% endif %}
+      {% if p.close_call %}<span class="pill warn">close call</span>{% endif %}
+      {% if p.in_tray %}<span class="pill ok">in tray</span>{% endif %}
+      {% if p.people %}<div class="people">{{ p.people }}</div>{% endif %}
+      {% if p.tags %}<div class="tags">#{{ p.tags.replace(', ', ' #') }}</div>{% endif %}
+    </figcaption>
+  </figure>
+{%- endmacro %}

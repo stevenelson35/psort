@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local photo curation: dedupe, group near-duplicate moments, pick the best shot, organize a private library."
 requires-python = ">=3.12"
 dependencies = [
+    "flask>=3.1.3",
     "imagehash>=4.3",
     "opencv-python-headless>=4.10",
     "pillow>=11.0",

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}psort{% endblock %} · psort</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="top">
+    <a href="{{ url_for('index') }}" class="brand">psort</a>
+    <a href="{{ url_for('close_calls') }}">Close calls{% if counts.close_calls %} <span class="pill warn">{{ counts.close_calls }}</span>{% endif %}</a>
+    <a href="{{ url_for('events') }}">Events</a>
+    <a href="{{ url_for('faces') }}">Faces{% if counts.unnamed_groups %} <span class="pill">{{ counts.unnamed_groups }}</span>{% endif %}</a>
+    <a href="{{ url_for('undated') }}">Undated{% if counts.undated %} <span class="pill warn">{{ counts.undated }}</span>{% endif %}</a>
+    <a href="{{ url_for('tray') }}">Post tray{% if counts.tray %} <span class="pill ok">{{ counts.tray }}</span>{% endif %}</a>
+  </nav>
+  <main>
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+      <p class="flash {{ category }}">{{ message }}</p>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
