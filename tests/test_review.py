@@ -159,3 +159,95 @@ def test_name_faces(ui, tmp_path):
 
     ui.post_ok("/faces/unlabel", face="1")
     assert conn.execute("SELECT COUNT(*) FROM people").fetchone()[0] == 0
+
+
+# ---- Submitting the forms the pages actually render (not hand-built requests) ----
+
+FORM = re.compile(r'<form method="post" action="([^"]+)".*?</form>', re.S)
+
+
+def forms(client, url):
+    page = text(client.get(url))
+    return [(m.group(1), dict(re.findall(r'name="(\w+)" value="([^"]*)"', m.group(0)))) for m in FORM.finditer(page)]
+
+
+def submit(client, url, action_contains, **extra):
+    """Submit the first form on `url` whose action contains `action_contains`, using its own fields."""
+    for action, fields in forms(client, url):
+        if action_contains in action:
+            return client.post(action, data={**fields, **extra})
+    raise AssertionError(f"no form matching {action_contains!r} on {url}")
+
+
+def test_every_rendered_form_carries_the_token(ui, tmp_path, sample_inbox):
+    from conftest import save, scene
+
+    twin = scene(60)
+    save(sample_inbox / "twins/IMG_3000.jpg", twin, "2026:07:06 10:00:00")
+    save(sample_inbox / "twins/IMG_3001.jpg", twin.point(lambda v: min(255, v + 3)), "2026:07:06 10:00:01")
+    from typer.testing import CliRunner
+
+    from psort.cli import app
+
+    CliRunner().invoke(app, ["--config", str(tmp_path / "psort.toml"), "run"])
+    burst = sha_of(tmp_path, "20260703_145634")["moment_id"]
+    sha = sha_of(tmp_path, "20260703_145640")["sha256"]
+    ui.post_ok(f"/photo/{sha}/tray")
+
+    pages = ["/", "/folder/2026/2026-07-03", f"/moment/{burst}", "/close-calls", "/events", "/faces",
+             "/undated", "/tray"]
+    tokens = {fields.get("csrf") for url in pages for _, fields in forms(ui, url)}
+    assert len(tokens) == 1 and "" not in tokens and None not in tokens
+
+
+def test_rendered_buttons_work(ui, tmp_path, sample_inbox):
+    from conftest import save, scene
+    from typer.testing import CliRunner
+
+    from psort.cli import app
+
+    twin = scene(60)
+    save(sample_inbox / "twins/IMG_3000.jpg", twin, "2026:07:06 10:00:00")
+    save(sample_inbox / "twins/IMG_3001.jpg", twin.point(lambda v: min(255, v + 3)), "2026:07:06 10:00:01")
+    CliRunner().invoke(app, ["--config", str(tmp_path / "psort.toml"), "run"])
+
+    # Close calls: "Pick this" on the runner-up.
+    runner_up = sha_of(tmp_path, "20260706_100001")
+    pick = f"/photo/{runner_up['sha256']}/best"
+    assert submit(ui, "/close-calls", pick).status_code == 302
+    assert db(tmp_path).execute("SELECT user_best FROM photos WHERE name = '20260706_100001'").fetchone()[0] == 1
+    assert "No close calls" in text(ui.get("/close-calls"))
+
+    # Moment page: "Make this the best", then "Let psort pick again".
+    burst = sha_of(tmp_path, "20260703_145634")["moment_id"]
+    blurry = sha_of(tmp_path, "20260703_145633")["sha256"]
+    assert submit(ui, f"/moment/{burst}", f"/photo/{blurry}/best").status_code == 302
+    assert "2026/2026-07-03/20260703_145633.jpg" in library_files(tmp_path / "library")
+    assert submit(ui, f"/moment/{burst}", f"/moment/{burst}/auto").status_code == 302
+    assert "2026/2026-07-03/20260703_145634.jpg" in library_files(tmp_path / "library")
+
+    # Tray add/remove, mark reviewed, tags, date, event name/unname.
+    best = sha_of(tmp_path, "20260703_145634")["sha256"]
+    assert submit(ui, f"/moment/{burst}", f"/photo/{best}/tray").status_code == 302
+    assert "Export 1 photo" in text(ui.get("/tray"))
+    assert submit(ui, "/tray", f"/photo/{best}/tray").status_code == 302  # the tray page's "Remove" button
+    assert "Empty" in text(ui.get("/tray"))
+    assert submit(ui, "/folder/2026/2026-07-03", "/reviewed").status_code == 302
+    assert "✓ Reviewed" in text(ui.get("/folder/2026/2026-07-03"))
+    assert submit(ui, f"/moment/{burst}", "/tags", tags="party").status_code == 302
+    assert submit(ui, "/events", "/events/name", name="Party Time").status_code == 302
+    assert "party-time" in text(ui.get("/events"))
+    assert submit(ui, "/events", "/events/unname").status_code == 302
+    undated = sha_of(tmp_path, "20200102_030405")["sha256"]
+    assert submit(ui, "/undated", f"/photo/{undated}/date", when="2026-07-04T08:00").status_code == 302
+
+    # Export from the tray form.
+    ui.post_ok(f"/photo/{blurry}/tray")
+    assert submit(ui, "/tray", "/tray/export", post="party").status_code == 302
+    assert (tmp_path / "outbox/party/20260703_145633.jpg").exists()
+
+
+def test_stale_page_gets_a_helpful_message(ui, tmp_path):
+    sha = sha_of(tmp_path, "20260703_145633")["sha256"]
+    resp = ui.post(f"/photo/{sha}/best", data={"csrf": "token-from-an-old-launch"})
+    assert resp.status_code == 403 and "reload the page" in resp.get_data(as_text=True)

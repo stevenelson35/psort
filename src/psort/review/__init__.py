@@ -26,6 +26,8 @@ def create_app(cfg: Config) -> Flask:
     app = Flask(__name__)
     token = secrets.token_urlsafe(32)
     app.secret_key = token
+    # A global, not just template context: macros imported from _macros.html can't see context.
+    app.jinja_env.globals["csrf"] = token
 
     def db() -> sqlite3.Connection:
         if "db" not in g:
@@ -44,14 +46,18 @@ def create_app(cfg: Config) -> Flask:
         if request.host.split(":")[0] not in LOCAL_HOSTS:
             abort(403)
         if request.method == "POST" and not secrets.compare_digest(request.form.get("csrf", ""), token):
-            abort(403)
+            # Usually a page left open from before `psort review` was restarted.
+            return (
+                "<p>This page is out of date (psort review was restarted since it loaded). "
+                "Go back, reload the page, and try again.</p>",
+                403,
+            )
 
     @app.context_processor
     def nav():
         conn = db()
         one = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
         return {
-            "csrf": token,
             "counts": {
                 "close_calls": one("SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1"),
                 "undated": one("SELECT COUNT(*) FROM photos WHERE date_source = 'mtime'"),
