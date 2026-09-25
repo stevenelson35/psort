@@ -11,6 +11,7 @@ psort is a local photo curation tool. It takes the chaotic, date-dumped folders 
 5. **Idempotent.** Re-running any command is safe. Photos are identified by their **content**, not their path, so moving or renaming inbox folders doesn't cause reprocessing, and your review decisions survive re-runs.
 6. **The blog stays unchanged in Phase 1.** The existing `blogupdate.html` → Cloudinary → GitHub Action → Turbify flow keeps working exactly as it does today (§8).
 7. **No videos.** Video files, including Live Photo `.mov` companions, are skipped. They're always *reported*, so nothing is silently lost before you delete an inbox batch.
+8. **No spaces in names.** Every folder and file psort creates uses lowercase letters, digits, `-` and `_` only. Event names you type are converted: "Birthday Party" → `birthday-party`.
 
 ## 2. Folders
 
@@ -83,6 +84,7 @@ These scores are only compared **within a moment**, so each photo is ranked agai
 | Exposure | Share of the histogram that's crushed to black or blown to white, and distance from mid-tones |
 
 - The composite is a weighted sum, with weights set in `psort.toml`. The highest score becomes the **best** pick unless you've overridden it.
+- **Close calls:** when the runner-up scores within `close_call_margin` of the best (default 5%), the moment is flagged. `psort close-calls` lists them, and the review UI shows them first, so you only check the near ties. Once you pick a shot, the flag clears.
 - Eyes-open and smile detection are future ideas.
 
 ### 5.4 Curate (library layout)
@@ -90,13 +92,16 @@ These scores are only compared **within a moment**, so each photo is ranked agai
 ```
 psort-library/
   2026/
-    2026-07-03/
+    2026-07-02/                     ← a day with no named event
+      20260702_174935.jpg
+    2026-07-03_birthday-party/      ← a named event (§5.6)
       20260703_145633.heic          ← best shot of each moment, and single photos
-      20260703_162028.jpg
       _alternates/
         20260703_145633/            ← the other shots from that moment
           20260703_145634.heic
-          20260703_145635.heic
+    2026-07-03_fireworks/           ← a second event on the same day
+    2026-07-04_summer-trip/         ← a multi-day event: one folder per day
+    2026-07-05_summer-trip/
   _undated/                         ← photos whose date is uncertain, until reviewed
   .psort/manifest.json
 ```
@@ -114,10 +119,41 @@ psort-library/
 - Delete an inbox batch only when it's all ✅, or you accept the ⚠️ items.
 - psort itself never deletes from the inbox.
 
+### 5.6 Events
+
+- **Suggestions:** `psort events` lists suggested events. A new one starts wherever shooting pauses for more than `gap_hours` (default 3). Each event's ID is its start time, like `20260703_145633`.
+- **Naming:**
+  - `psort events name <id> <name>` names one event.
+  - Add `--through <id>` to name a multi-day trip in one go.
+  - Folders are renamed immediately.
+- **How it works:**
+  - A named event is stored as a **time range**. Photos added later that fall inside it join the event automatically.
+  - Named ranges can't overlap. Naming again with the same name replaces its range.
+  - `psort events unname <name>` puts the plain date folders back.
+- Days with no named event keep plain `YYYY-MM-DD` folders.
+
+### 5.7 Faces
+
+- **Scan:** after curate, `psort run` finds faces in each library photo with YuNet. It stores a 128-number **embedding** (a face "fingerprint") for each, using OpenCV's SFace model (38 MB, downloaded once). Faces smaller than 32px at analysis size are ignored as too blurry to recognize.
+- **Grouping:** unnamed faces are linked to their nearest look-alikes and grouped. Each group is named after its smallest face ID.
+- **Naming:**
+  - `psort faces crops` writes thumbnails to `~/.local/share/psort/faces/`, one folder per person and per unnamed group. Browse them in File Explorer at `\\wsl.localhost\...`.
+  - `psort faces label <name> --group <id>` names a group. `--face <id>` names individual faces.
+  - Similar faces then get the name automatically, marked `auto`.
+  - `psort faces unlabel --face <id>` fixes a wrong one.
+- **Privacy:**
+  - Embeddings are biometric data. They stay **only** in the state database inside WSL.
+  - The library manifest records just the names of the people in each photo.
+  - Nothing is uploaded, and exports never include face data.
+- **Uses:**
+  - now: "who's in this photo" in the manifest
+  - planned: people filters in the review UI, a warning before publishing a photo that shows your daughter, and optionally favoring shots where family faces are sharp
+- Dogs' faces are often detected too, so pets can be named the same way.
+
 ## 6. Review UI
 
 - **`psort review`** starts a local Flask app at `http://localhost:5000`. It's only reachable from your own PC and has no login.
-- **Browse:** Year → day → a grid of moments. Each moment shows its best shot, with a count badge for alternates.
+- **Browse:** Year → day or event → a grid of moments. Close calls are listed first. Each moment shows its best shot, with a count badge for alternates.
 - **Actions:**
   - choose a different best shot
   - fix the date on an uncertain photo
@@ -165,6 +201,10 @@ psort-library/
 | `psort ingest` / `cluster` / `score` / `curate` | Runs one stage |
 | `psort status` | Totals: photos, moments, duplicates, skipped files, undated photos, unreviewed days |
 | `psort verify <batch>` | Safe-to-delete report (§5.5) |
+| `psort close-calls` | Moments where the automatic best pick was a near tie |
+| `psort events` / `events name` / `events unname` | Suggested events, and naming them (§5.6) |
+| `psort faces list` / `crops` / `label` / `unlabel` / `scan` | Face groups and people (§5.7) |
+| `psort fetch-models` | Downloads the face models if they're missing |
 | `psort review` | Starts the review UI |
 | `psort export <slug> [files…]` | Exports for a post (§7) |
 | `psort rebuild-state` | Rebuilds the database from `library/.psort/manifest.json` |
@@ -183,8 +223,9 @@ psort-library/
 - **Tests:** `pytest`, using a small set of test photos: a burst, an exact duplicate, a HEIC file, a rotated photo, a photo with GPS data, one with no EXIF, and a video.
 - No system packages are required. `exiftool` and `lftp` from the original draft aren't needed.
 
-## 11. Open Questions
+## 11. Decisions
 
-1. **Library size.** Roughly how many photos, and how many GB? This decides whether the library fits your OneDrive plan.
-2. **Event grouping.** Should moments on a day be grouped into events, like "Beach afternoon" or "Birthday party", for browsing? Currently only day folders are planned.
-3. **Face recognition.** Knowing *who* is in a photo is possible locally, but it's left out for now.
+- **Library size:** you'll make sure OneDrive has room.
+- **Events:** event names go in the day folder names (option A), as in §5.6.
+- **Faces:** recognition is included (§5.7).
+- **Close calls:** they're flagged for review (§5.3).

@@ -23,6 +23,15 @@ uv run psort run --dry-run          # preview what would be copied
 uv run psort run                    # ingest → cluster → score → curate
 uv run psort status
 uv run psort verify <batch-folder>  # is this inbox batch safe to delete?
+uv run psort close-calls            # near-tie best picks worth a look
+
+uv run psort events                               # suggested events
+uv run psort events name 20260703_145633 birthday-party
+uv run psort events name 20260704_080000 summer-trip --through 20260708_190000
+
+uv run psort faces list                           # people and unnamed face groups
+uv run psort faces crops                          # thumbnails to browse in File Explorer
+uv run psort faces label Steve --group 4
 ```
 
 psort never writes to the inbox. Delete a batch yourself once `verify` says it's safe.

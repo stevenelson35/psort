@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import Config
+from .events import named_ranges, slug_for
 from .imaging import sha256_file
 from .ingest import inbox_files
 
@@ -50,6 +51,7 @@ def desired_paths(conn: sqlite3.Connection) -> dict[str, str]:
     """sha256 → library-relative path, from the current moments and best picks."""
     rows = conn.execute("SELECT sha256, name, ext, taken_at, date_source, moment_id, is_best FROM photos").fetchall()
     best = {r["moment_id"]: r for r in rows if r["is_best"]}
+    ranges = named_ranges(conn)
     paths = {}
     for r in rows:
         if r["date_source"] == "mtime":
@@ -57,7 +59,8 @@ def desired_paths(conn: sqlite3.Connection) -> dict[str, str]:
             continue
         b = best[r["moment_id"]]
         day = b["taken_at"][:10]  # alternates live with their best shot, even across midnight
-        folder = f"{day[:4]}/{day}"
+        slug = slug_for(b["taken_at"], ranges)
+        folder = f"{day[:4]}/{day}_{slug}" if slug else f"{day[:4]}/{day}"
         if r["is_best"]:
             paths[r["sha256"]] = f"{folder}/{r['name']}{r['ext']}"
         else:
@@ -176,7 +179,16 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str) -> list[VerifyResu
 
 def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
     """A JSON copy of the state inside the library, so the library documents itself (DESIGN.md §2)."""
-    photos = [dict(r) for r in conn.execute("SELECT * FROM photos ORDER BY taken_at, name")]
+    people = {}
+    for r in conn.execute(
+        "SELECT DISTINCT f.sha256, p.name FROM faces f JOIN people p ON p.id = f.person_id ORDER BY p.name"
+    ):
+        people.setdefault(r["sha256"], []).append(r["name"])
+    photos = [
+        {**dict(r), "people": people.get(r["sha256"], [])}
+        for r in conn.execute("SELECT * FROM photos ORDER BY taken_at, name")
+    ]
+    events = [dict(r) for r in named_ranges(conn)]
     sources = [dict(r) for r in conn.execute("SELECT path, sha256 FROM sources WHERE status = 'image' ORDER BY path")]
     out = cfg.library / ".psort" / "manifest.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +199,7 @@ def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
                 "version": 1,
                 "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "photos": photos,
+                "events": events,
                 "sources": sources,
             },
             indent=1,

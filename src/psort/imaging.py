@@ -70,13 +70,15 @@ class FaceDetector:
     def load(cls, model: Path) -> "FaceDetector | None":
         return cls(model) if model.exists() else None
 
-    def detect(self, bgr: np.ndarray) -> list[tuple[int, int, int, int]]:
+    def detect_rows(self, bgr: np.ndarray) -> np.ndarray:
+        """Raw YuNet rows: box (4), five landmarks (10), confidence (1)."""
         h, w = bgr.shape[:2]
         self._detector.setInputSize((w, h))
         _, faces = self._detector.detect(bgr)
-        if faces is None:
-            return []
-        return [tuple(int(v) for v in face[:4]) for face in faces]
+        return faces if faces is not None else np.empty((0, 15), np.float32)
+
+    def detect(self, bgr: np.ndarray) -> list[tuple[int, int, int, int]]:
+        return [tuple(int(v) for v in row[:4]) for row in self.detect_rows(bgr)]
 
 
 def exposure_quality(gray: np.ndarray) -> float:
@@ -90,16 +92,22 @@ def _sharpness(gray: np.ndarray) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-def analyze(path: Path, faces: FaceDetector | None = None) -> Analysis:
+def load_small(path: Path) -> tuple[Image.Image, Image.Exif, int, int]:
+    """Upright RGB copy at analysis size, plus EXIF and the full upright width/height."""
     with Image.open(path) as im:
         exif = im.getexif()
-        exif_ifd = exif.get_ifd(_EXIF_IFD)
         width, height = im.size
         if exif.get(_TAG_ORIENTATION) in (5, 6, 7, 8):
             width, height = height, width
         im.draft("RGB", (ANALYSIS_SIZE, ANALYSIS_SIZE))  # fast JPEG downscale; no-op otherwise
         small = ImageOps.exif_transpose(im).convert("RGB")
     small.thumbnail((ANALYSIS_SIZE, ANALYSIS_SIZE))
+    return small, exif, width, height
+
+
+def analyze(path: Path, faces: FaceDetector | None = None) -> Analysis:
+    small, exif, width, height = load_small(path)
+    exif_ifd = exif.get_ifd(_EXIF_IFD)
 
     make = str(exif.get(_TAG_MAKE, "")).strip()
     model = str(exif.get(_TAG_MODEL, "")).strip()

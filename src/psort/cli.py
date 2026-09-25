@@ -9,13 +9,19 @@ from typing import Annotated
 import typer
 
 from . import config as config_mod
-from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, FACE_MODEL_URL, Config, ConfigError
+from . import events as events_mod
+from . import faces as faces_mod
+from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
 from .db import connect
 from .ingest import ingest
 from .library import curate, verify, write_manifest
 from .moments import cluster, score
 
 app = typer.Typer(no_args_is_help=True, help="Local photo curation. See DESIGN.md.")
+events_app = typer.Typer(help="Suggested events, and naming them.", invoke_without_command=True)
+faces_app = typer.Typer(help="Face recognition: see who's who and name people.", no_args_is_help=True)
+app.add_typer(events_app, name="events")
+app.add_typer(faces_app, name="faces")
 
 ConfigOpt = Annotated[Path, typer.Option("--config", "-c", help="Path to psort.toml.")]
 _config_path = DEFAULT_CONFIG_PATH
@@ -42,7 +48,7 @@ def init(
     library: Annotated[Path, typer.Option(help="Where the curated library is built.")],
     outbox: Annotated[Path, typer.Option(help="Where exports for blog posts go.")],
     state_dir: Annotated[Path, typer.Option(help="psort's database and models (keep inside WSL).")] = DEFAULT_STATE_DIR,
-    face_model: Annotated[bool, typer.Option(help="Download the face-detection model (~230 KB).")] = True,
+    face_model: Annotated[bool, typer.Option(help="Download the face detection + recognition models (~39 MB).")] = True,
     force: Annotated[bool, typer.Option(help="Overwrite an existing config.")] = False,
 ) -> None:
     """Create psort.toml and the state database."""
@@ -58,15 +64,29 @@ def init(
     typer.echo(f"Wrote {_config_path}")
     if not inbox.is_dir():
         typer.secho(f"Note: inbox {inbox} doesn't exist yet.", fg="yellow")
-    if face_model and not cfg.face_model.exists():
-        cfg.face_model.parent.mkdir(parents=True, exist_ok=True)
-        partial = cfg.face_model.with_name(cfg.face_model.name + ".partial")
+    if face_model:
+        _download_models(cfg)
+
+
+@app.command("fetch-models")
+def fetch_models() -> None:
+    """Download the face detection and recognition models if missing."""
+    cfg, _ = _open()
+    _download_models(cfg)
+
+
+def _download_models(cfg: Config) -> None:
+    for path, url in cfg.models:
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial = path.with_name(path.name + ".partial")
         try:
-            urllib.request.urlretrieve(FACE_MODEL_URL, partial)
-            os.replace(partial, cfg.face_model)
-            typer.echo(f"Downloaded face model to {cfg.face_model}")
+            urllib.request.urlretrieve(url, partial)
+            os.replace(partial, path)
+            typer.echo(f"Downloaded {path.name}")
         except OSError as e:
-            typer.secho(f"Couldn't download face model ({e}); continuing without face scoring.", fg="yellow")
+            typer.secho(f"Couldn't download {path.name} ({e}); face features stay off.", fg="yellow")
 
 
 @app.command("ingest")
@@ -100,12 +120,14 @@ def curate_cmd(dry_run: Annotated[bool, typer.Option(help="Show what would chang
 
 @app.command()
 def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; show what would change.")] = False) -> None:
-    """Ingest → cluster → score → curate."""
+    """Ingest → cluster → score → curate → faces."""
     cfg, conn = _open()
     _ingest(cfg, conn)
     typer.echo(f"Moments: {cluster(cfg, conn)}")
     score(cfg, conn)
     _curate(cfg, conn, dry_run)
+    if not dry_run:
+        _faces(cfg, conn)
 
 
 @app.command()
@@ -116,6 +138,10 @@ def status() -> None:
         "Photos": "SELECT COUNT(*) FROM photos",
         "Moments": "SELECT COUNT(DISTINCT moment_id) FROM photos",
         "Alternates": "SELECT COUNT(*) FROM photos WHERE is_best = 0",
+        "Close calls": "SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1",
+        "Named events": "SELECT COUNT(*) FROM named_events",
+        "Named people": "SELECT COUNT(*) FROM people",
+        "Faces found": "SELECT COUNT(*) FROM faces",
         "Exact duplicates": "SELECT COUNT(*) - COUNT(DISTINCT sha256) FROM sources WHERE status = 'image'",
         "Undated": "SELECT COUNT(*) FROM photos WHERE date_source = 'mtime'",
         "Screenshots": "SELECT COUNT(*) FROM photos WHERE is_screenshot = 1",
@@ -126,6 +152,133 @@ def status() -> None:
     for label, sql in counts.items():
         typer.echo(f"{label + ':':18}{conn.execute(sql).fetchone()[0]}")
     typer.echo(f"{'Face detection:':18}{'on' if cfg.face_model.exists() else 'off (model not downloaded)'}")
+    typer.echo(f"{'Face recognition:':18}{'on' if cfg.recognition_model.exists() else 'off (model not downloaded)'}")
+
+
+@app.command("close-calls")
+def close_calls() -> None:
+    """Moments where the automatic best pick was a near tie. Worth a quick look."""
+    cfg, conn = _open()
+    rows = conn.execute(
+        """SELECT moment_id, name, library_path, score, is_best FROM photos
+           WHERE close_call = 1 ORDER BY moment_id, is_best DESC, score DESC"""
+    ).fetchall()
+    if not rows:
+        typer.echo("No close calls.")
+        return
+    moment = None
+    for r in rows:
+        if r["moment_id"] != moment:
+            moment = r["moment_id"]
+            typer.echo("")
+        typer.echo(f"  {'★' if r['is_best'] else ' '} {r['score']:.3f}  {r['library_path']}")
+    count = len({r["moment_id"] for r in rows})
+    typer.echo(f"\n{count} close call(s). ★ = current pick. The review UI will let you choose.")
+
+
+@events_app.callback()
+def events_list(ctx: typer.Context) -> None:
+    """List suggested events (a new one starts after a long gap in shooting)."""
+    if ctx.invoked_subcommand:
+        return
+    cfg, conn = _open()
+    events = events_mod.suggest(conn, cfg.event_gap_hours)
+    for e in events:
+        span = e.start[:16].replace("T", " ") + (" → " + e.end[:16].replace("T", " ") if e.end != e.start else "")
+        typer.echo(f"  {e.id}  {e.photos:4} photos  {span}  {e.slug or ''}")
+    typer.echo(f"{len(events)} events. Name one: psort events name <id> <name> [--through <id>]")
+
+
+@events_app.command("name")
+def events_name(
+    event: Annotated[str, typer.Argument(help="Event id from `psort events`.")],
+    name: Annotated[str, typer.Argument(help="e.g. birthday-party (spaces become hyphens).")],
+    through: Annotated[str | None, typer.Option(help="Last event id, for a multi-day event.")] = None,
+) -> None:
+    """Name an event; its day folders become YYYY-MM-DD_<name>."""
+    cfg, conn = _open()
+    try:
+        slug = events_mod.name(conn, cfg.event_gap_hours, event, name, through)
+    except events_mod.EventError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    typer.echo(f"Named {slug!r}.")
+    _curate(cfg, conn, dry_run=False)
+
+
+@events_app.command("unname")
+def events_unname(name: str) -> None:
+    """Remove an event name; its folders go back to plain dates."""
+    cfg, conn = _open()
+    try:
+        events_mod.unname(conn, name)
+    except events_mod.EventError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    _curate(cfg, conn, dry_run=False)
+
+
+@faces_app.command("scan")
+def faces_scan() -> None:
+    """Find faces in library photos that haven't been scanned yet (also part of `psort run`)."""
+    cfg, conn = _open()
+    _faces(cfg, conn)
+
+
+@faces_app.command("list")
+def faces_list() -> None:
+    """Named people, and the biggest groups of unnamed look-alike faces."""
+    cfg, conn = _open()
+    people, clusters = faces_mod.summary(conn)
+    typer.echo("People:" if people else "No named people yet.")
+    for p in people:
+        typer.echo(f"  {p['name']:20} {p['photos']:5} photos  ({p['user']} named by you, {p['auto']} auto)")
+    typer.echo("Unnamed groups:" if clusters else "No unnamed faces.")
+    for c in clusters:
+        typer.echo(f"  group {c['cluster']:<6} {c['faces']:5} faces in {c['photos']} photos")
+    if clusters:
+        typer.echo("See them: psort faces crops   Name one: psort faces label <name> --group <id>")
+
+
+@faces_app.command("crops")
+def faces_crops() -> None:
+    """Write face thumbnails per person and group, to browse in File Explorer."""
+    cfg, conn = _open()
+    out = faces_mod.write_crops(cfg, conn)
+    typer.echo(f"Face thumbnails in {out}\nIn Windows: {faces_mod.windows_path(out)}")
+
+
+@faces_app.command("label")
+def faces_label(
+    name: Annotated[str, typer.Argument(help="Person's name, e.g. Steve.")],
+    group: Annotated[int | None, typer.Option(help="Unnamed group id from `psort faces list`.")] = None,
+    face: Annotated[list[int] | None, typer.Option(help="Face id (from a thumbnail name). Repeatable.")] = None,
+) -> None:
+    """Name the faces in a group (or specific faces). Similar faces get the name automatically."""
+    cfg, conn = _open()
+    if group is None and not face:
+        typer.secho("Give --group or --face.", fg="red", err=True)
+        raise typer.Exit(1)
+    try:
+        n = faces_mod.label(cfg, conn, name, group, face)
+    except faces_mod.FaceError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    auto = conn.execute(
+        "SELECT COUNT(*) FROM faces f JOIN people p ON p.id = f.person_id WHERE p.name = ? AND f.label_source = 'auto'",
+        (name.strip(),),
+    ).fetchone()[0]
+    typer.echo(f"Named {n} face(s) {name!r}; {auto} more matched automatically.")
+    write_manifest(cfg, conn)
+
+
+@faces_app.command("unlabel")
+def faces_unlabel(face: Annotated[list[int], typer.Option(help="Face id. Repeatable.")]) -> None:
+    """Remove a wrong name from specific faces."""
+    cfg, conn = _open()
+    faces_mod.unlabel(cfg, conn, face)
+    typer.echo(f"Unlabeled {len(face)} face(s).")
+    write_manifest(cfg, conn)
 
 
 @app.command("verify")
@@ -159,6 +312,16 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
         f"Ingest: {s.new_photos} new, {s.duplicates} exact duplicates, {s.unchanged} unchanged, "
         f"{s.skipped} skipped, {s.errors} unreadable"
     )
+
+
+def _faces(cfg: Config, conn: sqlite3.Connection) -> None:
+    scanned = faces_mod.scan(cfg, conn, log=typer.echo)
+    if scanned is None:
+        typer.echo("Faces: recognition model not downloaded (run `psort fetch-models`).")
+        return
+    faces_mod.assign(cfg, conn)
+    typer.echo(f"Faces: scanned {scanned} new photos")
+    write_manifest(cfg, conn)
 
 
 def _curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool) -> None:

@@ -72,8 +72,12 @@ def score(cfg: Config, conn: sqlite3.Connection) -> None:
 
         user_picks = [m["sha256"] for m in members if m["user_best"]]
         best = user_picks[0] if user_picks else max(members, key=lambda m: scores[m["sha256"]])["sha256"]
+        # Close call: the runner-up is nearly as good, so the automatic pick deserves a look.
+        # Once you've picked, it's settled.
+        ranked = sorted(scores.values(), reverse=True)
+        close = not user_picks and len(ranked) > 1 and ranked[0] - ranked[1] <= cfg.close_call_margin * ranked[0]
         conn.executemany(
-            "UPDATE photos SET score = ?, is_best = ? WHERE sha256 = ?",
-            [(scores[m["sha256"]], int(m["sha256"] == best), m["sha256"]) for m in members],
+            "UPDATE photos SET score = ?, is_best = ?, close_call = ? WHERE sha256 = ?",
+            [(scores[m["sha256"]], int(m["sha256"] == best), int(close), m["sha256"]) for m in members],
         )
     conn.commit()

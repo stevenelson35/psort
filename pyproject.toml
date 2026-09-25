@@ -8,6 +8,7 @@ dependencies = [
     "opencv-python-headless>=4.10",
     "pillow>=11.0",
     "pillow-heif>=0.20",
+    "scipy>=1.13",
     "typer>=0.15",
 ]
 

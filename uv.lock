@@ -314,6 +314,7 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "pillow" },
     { name = "pillow-heif" },
+    { name = "scipy" },
     { name = "typer" },
 ]
 
@@ -328,6 +329,7 @@ requires-dist = [
     { name = "opencv-python-headless", specifier = ">=4.10" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "pillow-heif", specifier = ">=0.20" },
+    { name = "scipy", specifier = ">=1.13" },
     { name = "typer", specifier = ">=0.15" },
 ]
 
