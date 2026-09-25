@@ -8,6 +8,7 @@ from itertools import groupby
 import imagehash
 
 from .config import Config
+from .dates import NO_TIME, sql_in
 
 
 def cluster(cfg: Config, conn: sqlite3.Connection) -> int:
@@ -17,9 +18,10 @@ def cluster(cfg: Config, conn: sqlite3.Connection) -> int:
     ).fetchall()
 
     moments: list[list[sqlite3.Row]] = []
-    # Photos dated only by file mtime can share bogus timestamps (bulk copies), so never group them.
-    moments.extend([r] for r in rows if r["date_source"] == "mtime")
-    dated = [r for r in rows if r["date_source"] != "mtime"]
+    # Photos without a real capture time (file mtime, folder date) share made-up timestamps, so
+    # never group them into bursts.
+    moments.extend([r] for r in rows if r["date_source"] in NO_TIME)
+    dated = [r for r in rows if r["date_source"] not in NO_TIME]
 
     hashes = {r["sha256"]: imagehash.hex_to_hash(r["phash"]) for r in dated}
     for _, camera_rows in groupby(dated, key=lambda r: r["camera"] or ""):
@@ -66,9 +68,9 @@ def mark_duplicates(cfg: Config, conn: sqlite3.Connection) -> int:
     """Within each moment, set duplicate_of on every visual copy except the best-quality one
     (most pixels, then sharpest, then largest file). Returns how many copies were set aside."""
     rows = conn.execute(
-        """SELECT p.sha256, p.moment_id, p.taken_at, p.phash, p.width, p.height, p.sharpness, p.exposure,
+        f"""SELECT p.sha256, p.moment_id, p.taken_at, p.phash, p.width, p.height, p.sharpness, p.exposure,
                   (SELECT MAX(s.size) FROM sources s WHERE s.sha256 = p.sha256) AS size
-           FROM photos p WHERE p.date_source != 'mtime' ORDER BY p.moment_id, p.taken_at"""
+           FROM photos p WHERE p.date_source NOT IN {sql_in(NO_TIME)} ORDER BY p.moment_id, p.taken_at"""
     ).fetchall()
     hashes = {r["sha256"]: imagehash.hex_to_hash(r["phash"]) for r in rows}
     duplicate_of: dict[str, str | None] = {r["sha256"]: None for r in rows}
@@ -99,7 +101,7 @@ def mark_duplicates(cfg: Config, conn: sqlite3.Connection) -> int:
                     if m is not keeper:
                         duplicate_of[m["sha256"]] = keeper["sha256"]
 
-    conn.execute("UPDATE photos SET duplicate_of = NULL WHERE date_source = 'mtime'")
+    conn.execute(f"UPDATE photos SET duplicate_of = NULL WHERE date_source IN {sql_in(NO_TIME)}")
     conn.executemany("UPDATE photos SET duplicate_of = ? WHERE sha256 = ?", [(v, k) for k, v in duplicate_of.items()])
     conn.commit()
     return sum(v is not None for v in duplicate_of.values())

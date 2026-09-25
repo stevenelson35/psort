@@ -2,6 +2,19 @@
 
 import re
 from datetime import datetime
+from pathlib import PurePath
+
+# How sure we are of a photo's capture time, by where it came from:
+#   exif, filename, user  → real date and time
+#   folder                → the day, from a folder name like "2016-01-03 - Marathon" (time unknown)
+#   folder-month          → only the month, from "2016-04 - PhotoPass" (day and time unknown)
+#   mtime                 → the file's modified time: a guess
+UNCERTAIN = ("mtime", "folder-month")  # listed on the Undated page for you to fix
+NO_TIME = ("mtime", "folder", "folder-month")  # no real time: never grouped into bursts or events
+
+
+def sql_in(values: tuple[str, ...]) -> str:
+    return "(" + ", ".join(f"'{v}'" for v in values) + ")"
 
 _FILENAME_PATTERNS = [
     # IMG_20260703_145633, PXL_20260703_145633123, 20260703_145633, VID-20260703-145633
@@ -34,4 +47,24 @@ def from_filename(name: str) -> datetime | None:
                 continue
             if _plausible(dt):
                 return dt
+    return None
+
+
+_FOLDER_DAY = re.compile(r"(?<!\d)(\d{4})[-_.](\d{2})[-_.](\d{2})(?!\d)")
+_FOLDER_MONTH = re.compile(r"(?<!\d)(\d{4})[-_.](\d{2})(?![-_.]?\d)")
+
+
+def from_folders(rel_path: str) -> tuple[datetime, str] | None:
+    """A date from the photo's folder names, nearest folder first: a day ('folder') or just a
+    month ('folder-month'). The time is set to noon since it's unknown."""
+    for folder in reversed(PurePath(rel_path).parts[:-1]):
+        for pattern, source in ((_FOLDER_DAY, "folder"), (_FOLDER_MONTH, "folder-month")):
+            for match in pattern.finditer(folder):
+                parts = [int(g) for g in match.groups()] + ([1] if source == "folder-month" else [])
+                try:
+                    dt = datetime(*parts, 12, 0, 0)
+                except ValueError:
+                    continue
+                if _plausible(dt):
+                    return dt, source
     return None

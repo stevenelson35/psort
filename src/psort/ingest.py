@@ -26,6 +26,7 @@ class IngestStats:
     unchanged: int = 0
     skipped: int = 0
     errors: int = 0
+    redated: int = 0  # earlier undated photos now dated from folder names
 
 
 def batch_of(rel: Path) -> str:
@@ -39,12 +40,37 @@ def inbox_files(inbox: Path, under: Path | None = None):
             yield path, path.relative_to(inbox)
 
 
-def _taken_at(path: Path, exif_value: object, mtime: float) -> tuple[datetime, str]:
+def _taken_at(path: Path, rel: Path, exif_value: object, mtime: float) -> tuple[datetime, str]:
     if dt := dates.parse_exif_datetime(exif_value):
         return dt, "exif"
     if dt := dates.from_filename(path.name):
         return dt, "filename"
+    if found := dates.from_folders(str(rel)):
+        return found
     return datetime.fromtimestamp(mtime).replace(microsecond=0), "mtime"
+
+
+def redate_from_folders(conn: sqlite3.Connection) -> int:
+    """Photos ingested before folder dates existed (or dated only by file time): try their folder
+    names now. Their library names follow the new date unless already in the tray or exported."""
+    changed = 0
+    rows = conn.execute(
+        """SELECT p.sha256, (SELECT MIN(s.path) FROM sources s WHERE s.sha256 = p.sha256) AS path,
+                  EXISTS (SELECT 1 FROM tray t WHERE t.sha256 = p.sha256)
+                  OR EXISTS (SELECT 1 FROM exports e WHERE e.sha256 = p.sha256) AS published
+           FROM photos p WHERE p.date_source = 'mtime'"""
+    ).fetchall()
+    for r in rows:
+        if r["path"] and (found := dates.from_folders(r["path"])):
+            dt, source = found
+            conn.execute(
+                "UPDATE photos SET taken_at = ?, date_source = ?" + ("" if r["published"] else ", name = NULL")
+                + " WHERE sha256 = ?",
+                (dt.isoformat(), source, r["sha256"]),
+            )
+            changed += 1
+    conn.commit()
+    return changed
 
 
 def _is_screenshot(path: Path, camera: str | None) -> bool:
@@ -85,7 +111,7 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
                     stats.duplicates += 1
                 else:
                     a = analyze(path, detector)
-                    taken, source = _taken_at(path, a.exif_datetime, st.st_mtime)
+                    taken, source = _taken_at(path, rel, a.exif_datetime, st.st_mtime)
                     conn.execute(
                         """INSERT INTO photos (sha256, ext, taken_at, tz_offset, date_source, camera, width, height,
                                is_screenshot, phash, sharpness, exposure, faces, face_sharpness)
@@ -105,4 +131,5 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
             log(f"  …{n} files scanned")
 
     conn.commit()
+    stats.redated = redate_from_folders(conn)
     return stats

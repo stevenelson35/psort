@@ -15,6 +15,7 @@ from .. import export as export_mod
 from .. import events as events_mod
 from .. import faces as faces_mod
 from ..config import Config
+from ..dates import UNCERTAIN, sql_in
 from ..db import connect
 from ..winpath import windows_path
 
@@ -60,7 +61,7 @@ def create_app(cfg: Config) -> Flask:
         return {
             "counts": {
                 "close_calls": one("SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1"),
-                "undated": one("SELECT COUNT(*) FROM photos WHERE date_source = 'mtime'"),
+                "undated": one(f"SELECT COUNT(*) FROM photos WHERE date_source IN {sql_in(UNCERTAIN)}"),
                 "tray": one("SELECT COUNT(*) FROM tray"),
                 "unnamed_groups": one("SELECT COUNT(DISTINCT cluster) FROM faces WHERE cluster IS NOT NULL"),
             },
@@ -137,7 +138,8 @@ def create_app(cfg: Config) -> Flask:
     @app.get("/undated")
     def undated():
         photos = db().execute(
-            f"SELECT {CARD_COLUMNS}, p.taken_at FROM photos p WHERE p.date_source = 'mtime' ORDER BY p.taken_at"
+            f"""SELECT {CARD_COLUMNS}, p.taken_at, p.date_source FROM photos p
+                WHERE p.date_source IN {sql_in(UNCERTAIN)} ORDER BY p.taken_at, p.name"""
         ).fetchall()
         return render_template("undated.html", photos=photos)
 
@@ -326,6 +328,8 @@ def pretty_folder(key: str) -> tuple[str, str]:
     if key == "_undated":
         return "Undated", ""
     name = key.split("/")[1]
+    if name.endswith("_unknown-day"):
+        return datetime.strptime(name[:7], "%Y-%m").strftime("%B %Y"), "day unknown"
     day, _, slug = name.partition("_")
     return datetime.strptime(day, "%Y-%m-%d").strftime("%a %-d %b %Y"), slug.replace("-", " ")
 
@@ -345,9 +349,9 @@ def folders(conn: sqlite3.Connection) -> list[dict]:
             f["close"].add(r["moment_id"])
     out = []
     for key, f in sorted(acc.items()):
-        day = None if key == "_undated" else key.split("/")[1][:10]
+        day = None if key == "_undated" or key.endswith("_unknown-day") else key.split("/")[1][:10]
         out.append({
-            "key": key, "year": "Undated" if day is None else day[:4], "day": day,
+            "key": key, "year": "Undated" if key == "_undated" else key[:4], "day": day,
             "photos": f["photos"], "moments": len(f["moments"]), "close_calls": len(f["close"]),
             "reviewed": day in reviewed,
         })

@@ -12,6 +12,7 @@ from . import config as config_mod
 from . import events as events_mod
 from . import faces as faces_mod
 from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
+from .dates import UNCERTAIN, sql_in
 from .db import connect
 from .export import ExportError, export
 from .ingest import ingest
@@ -173,7 +174,7 @@ def status() -> None:
         "Named people": "SELECT COUNT(*) FROM people",
         "Faces found": "SELECT COUNT(*) FROM faces",
         "Exact duplicates": "SELECT COUNT(*) - COUNT(DISTINCT sha256) FROM sources WHERE status = 'image'",
-        "Undated": "SELECT COUNT(*) FROM photos WHERE date_source = 'mtime'",
+        "Undated": f"SELECT COUNT(*) FROM photos WHERE date_source IN {sql_in(UNCERTAIN)}",
         "Screenshots": "SELECT COUNT(*) FROM photos WHERE is_screenshot = 1",
         "Not in library": "SELECT COUNT(*) FROM photos WHERE library_path IS NULL",
         "Skipped files": "SELECT COUNT(*) FROM sources WHERE status = 'skipped'",
@@ -342,6 +343,8 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
         f"Ingest: {s.new_photos} new, {s.duplicates} exact duplicates, {s.unchanged} unchanged, "
         f"{s.skipped} skipped, {s.errors} unreadable"
     )
+    if s.redated:
+        typer.echo(f"Dated {s.redated} earlier undated photo(s) from their folder names")
 
 
 def _cluster(cfg: Config, conn: sqlite3.Connection) -> None:

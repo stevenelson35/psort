@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import Config
+from .dates import NO_TIME
 from .events import named_ranges, slug_for
 from .imaging import sha256_file
 from .ingest import inbox_files
@@ -17,6 +18,7 @@ from .ingest import inbox_files
 UNDATED_DIR = "_undated"
 ALTERNATES_DIR = "_alternates"
 DUPLICATES_DIR = "_duplicates"
+UNKNOWN_DAY = "unknown-day"
 
 
 @dataclass
@@ -61,9 +63,14 @@ def desired_paths(conn: sqlite3.Connection) -> dict[str, str]:
         if r["date_source"] == "mtime":
             paths[r["sha256"]] = f"{UNDATED_DIR}/{r['name']}{r['ext']}"
             continue
+        if r["date_source"] == "folder-month":
+            month = r["taken_at"][:7]  # the day is unknown, so it waits in a per-month folder
+            paths[r["sha256"]] = f"{month[:4]}/{month}_{UNKNOWN_DAY}/{r['name']}{r['ext']}"
+            continue
         b = best[r["moment_id"]]
         day = b["taken_at"][:10]  # alternates live with their best shot, even across midnight
-        slug = slug_for(b["taken_at"], ranges)
+        # Without a real time we can't tell whether it was during a named event.
+        slug = None if b["date_source"] in NO_TIME else slug_for(b["taken_at"], ranges)
         folder = f"{day[:4]}/{day}_{slug}" if slug else f"{day[:4]}/{day}"
         if r["is_best"]:
             paths[r["sha256"]] = f"{folder}/{r['name']}{r['ext']}"

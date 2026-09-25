@@ -3,13 +3,15 @@
 {% block title %}Undated{% endblock %}
 {% block content %}
 <h1>Undated photos</h1>
-<p class="muted">These had no date inside the file or in the filename, so psort guessed from the file's modified time.
-  Enter the real date (roughly is fine) and the photo moves into its day folder.</p>
+<p class="muted">These had no date inside the file or in its name. Some got the month from their folder name
+  ("day unknown"); the rest are a guess from the file's modified time. Enter the real date (roughly is fine) and the
+  photo moves into its day folder.</p>
 {% if not photos %}<p>Nothing undated.</p>{% endif %}
 <div class="grid">
 {% for p in photos %}
   <div>
     {{ card(p) }}
+    <div class="muted">{{ "month from folder name" if p.date_source == "folder-month" else "guessed from file time" }}</div>
     <form method="post" action="{{ url_for('date', sha=p.sha256) }}" class="row">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="next" value="{{ request.path }}">

@@ -10,6 +10,8 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from .dates import NO_TIME, sql_in
+
 
 class EventError(Exception):
     pass
@@ -52,7 +54,7 @@ def suggest(conn: sqlite3.Connection, gap_hours: float) -> list[Event]:
     gap = timedelta(hours=gap_hours)
     ranges = named_ranges(conn)
     times = [r["taken_at"] for r in conn.execute(
-        "SELECT taken_at FROM photos WHERE date_source != 'mtime' ORDER BY taken_at"
+        f"SELECT taken_at FROM photos WHERE date_source NOT IN {sql_in(NO_TIME)} ORDER BY taken_at"
     )]
     groups: list[list[str]] = []
     for t in times:

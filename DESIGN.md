@@ -60,7 +60,12 @@ inbox ──ingest──► state DB ──cluster──► moments ──score�
   - **Timestamp**, taken from the first of these that works:
     1. EXIF `DateTimeOriginal` (plus `OffsetTimeOriginal` when present)
     2. a date in the filename (`IMG_20260703_145633`, `PXL_20260703_145633123`, `20260703_145633`, `Screenshot_2026-07-03-…`)
-    3. the file's modified time, marked **date uncertain** so it shows up for review
+    3. a date in a **folder name**, nearest folder first:
+       - `2016-01-03 - Marathon` gives that day. The time is unknown, so it's set to noon.
+       - `2016-04 - PhotoPass` gives only the month. Those photos go in `2016/2016-04_unknown-day/` and are listed for review.
+       - Photos dated from a folder are never grouped into bursts or events, since they have no real time.
+       - Photos ingested before this rule existed are re-dated automatically.
+    4. the file's modified time, marked **date uncertain** so it shows up for review
   - **Other data:** camera model, width and height, orientation, screenshot flag (PNG, no camera EXIF, or screenshot-style name).
 - Records every skipped file (videos, unreadable files, unknown types), with its reason.
 
