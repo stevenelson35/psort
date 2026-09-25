@@ -6,7 +6,6 @@
 3. label:  you name a cluster (or single faces); `assign` then spreads the name to similar faces.
 """
 
-import os
 import shutil
 import sqlite3
 from collections.abc import Callable
@@ -271,9 +270,3 @@ def crop_face(cfg: Config, face: sqlite3.Row, size: int = 160) -> Image.Image | 
     crop = small.crop(box)
     crop.thumbnail((size, size), Image.LANCZOS)
     return crop
-
-
-def windows_path(path: Path) -> str:
-    """How to open a WSL path in File Explorer."""
-    distro = os.environ.get("WSL_DISTRO_NAME")
-    return f"\\\\wsl.localhost\\{distro}{str(path).replace('/', chr(92))}" if distro else str(path)

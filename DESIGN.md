@@ -172,13 +172,21 @@ psort-library/
 
 ## 7. Export for a Post
 
-- `psort export <post-slug>` writes every photo in the export tray (or ones picked on the command line) to `<outbox>/<post-slug>/`. Each exported photo:
-  - is converted to **JPEG**, quality 85
-  - is **rotated upright** using its EXIF orientation. That's usually the cause of sideways blog photos, so `rotate_pic.sh` should rarely be needed.
-  - is resized to at most **2048px** on the long edge, the blog's largest size
-  - has **GPS and other location data stripped**, along with camera serial numbers. The date is kept.
+- **Two ways to export:**
+  - On the **Post tray** page, type a post name and click **Export**.
+  - Or run `psort export <post-name>`. Add library names to export specific photos without using the tray.
+- Photos are written to `<outbox>/<post-slug>/`. The post name becomes a slug, like `go-dogs-go`, so there are no spaces.
+- **Each exported photo:**
+  - is a **JPEG** at quality 85, with HEIC converted
+  - is **rotated upright**, with the rotation built into the pixels. That's usually the cause of sideways blog photos, so `rotate_pic.sh` should rarely be needed.
+  - is resized to at most **2048px** on the long edge, the blog's largest size. Smaller photos are never enlarged.
+  - is flattened onto white if it has a transparent background (screenshots)
+  - keeps only an **allowlist** of metadata: camera make and model, the date taken, and its time zone. **GPS, serial numbers, owner and lens info, maker notes, embedded thumbnails, XMP and comments are all dropped.** The color profile is kept so colors stay right.
   - keeps its library filename (`20260703_145633.jpg`), so the blog's naming stays consistent
-- Each export is logged, so the UI can show which photos have already appeared in which posts.
+- **After export:**
+  - Exported photos leave the tray, unless you use `--keep-tray` on the command line.
+  - Each export is recorded, and photo cards show "posted in: …".
+- **People warning:** the tray page lists who's in the photos before you export, since blog posts are public.
 
 ## 8. Blog Integration
 

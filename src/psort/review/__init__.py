@@ -11,10 +11,12 @@ from flask import Flask, abort, flash, g, redirect, render_template, request, se
 from PIL import Image, ImageOps
 
 from .. import actions
+from .. import export as export_mod
 from .. import events as events_mod
 from .. import faces as faces_mod
 from ..config import Config
 from ..db import connect
+from ..winpath import windows_path
 
 THUMB_SIZES = {320, 1280}
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
@@ -136,11 +138,25 @@ def create_app(cfg: Config) -> Flask:
     @app.get("/tray")
     def tray():
         photos = db().execute(
-            f"SELECT {CARD_COLUMNS} FROM photos p JOIN tray t ON t.sha256 = p.sha256 ORDER BY t.added_at"
+            f"SELECT {CARD_COLUMNS} FROM photos p JOIN tray t ON t.sha256 = p.sha256 ORDER BY p.taken_at, p.name"
         ).fetchall()
-        return render_template("tray.html", photos=photos)
+        posts = db().execute(
+            "SELECT post, COUNT(*) AS photos, MAX(exported_at) AS last FROM exports GROUP BY post ORDER BY last DESC LIMIT 10"
+        ).fetchall()
+        return render_template("tray.html", photos=photos, posts=posts, outbox=windows_path(cfg.outbox))
 
     # ---- Decisions ----
+
+    @app.post("/tray/export")
+    def tray_export():
+        try:
+            result = export_mod.export(cfg, db(), request.form.get("post", ""))
+        except (export_mod.ExportError, events_mod.EventError) as e:
+            flash(str(e), "error")
+            return redirect(url_for("tray"))
+        flash(f"Exported {len(result.files)} photo(s) to {windows_path(result.folder)}. "
+              "Upload them from there with blogupdate.html.", "ok")
+        return redirect(url_for("tray"))
 
     @app.post("/photo/<sha>/best")
     def best(sha):
@@ -287,7 +303,8 @@ CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.cl
     EXISTS (SELECT 1 FROM tray t WHERE t.sha256 = p.sha256) AS in_tray,
     (SELECT group_concat(name, ', ') FROM (SELECT DISTINCT pe.name FROM faces f
         JOIN people pe ON pe.id = f.person_id WHERE f.sha256 = p.sha256 ORDER BY pe.name)) AS people,
-    (SELECT group_concat(tag, ', ') FROM (SELECT tag FROM tags WHERE sha256 = p.sha256 ORDER BY tag)) AS tags"""
+    (SELECT group_concat(tag, ', ') FROM (SELECT tag FROM tags WHERE sha256 = p.sha256 ORDER BY tag)) AS tags,
+    (SELECT group_concat(post, ', ') FROM (SELECT post FROM exports WHERE sha256 = p.sha256 ORDER BY post)) AS posts"""
 
 
 def folder_key(library_path: str) -> str:

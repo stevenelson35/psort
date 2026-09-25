@@ -3,11 +3,30 @@
 {% block title %}Post tray{% endblock %}
 {% block content %}
 <h1>Post tray</h1>
-<p class="muted">Photos you've picked for the next blog post. Exporting them for <code>blogupdate.html</code> comes in the next update.</p>
-{% if not photos %}<p>Empty. Use "Add to post tray" on any photo.</p>{% endif %}
+{% if photos %}
+  <form method="post" action="{{ url_for('tray_export') }}" class="row export">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="post" placeholder="post name, e.g. go dogs go" required>
+    <button class="ok">Export {{ photos|length }} photo{{ "" if photos|length == 1 else "s" }}</button>
+  </form>
+  <p class="muted">Writes upright JPEGs, at most 2048px, with GPS and other location data removed, to
+    <code>{{ outbox }}\&lt;post-name&gt;</code>. Pick them from there in <code>blogupdate.html</code>.
+    Exported photos leave the tray.</p>
+  {% set with_people = photos|selectattr("people")|list %}
+  {% if with_people %}
+    <p class="flash warn">{{ with_people|length }} of these show people ({{ with_people|map(attribute="people")|join("; ") }}).
+      Blog posts are public, so check you're happy sharing them.</p>
+  {% endif %}
+{% else %}
+  <p>Empty. Use "Add to post tray" on any photo.</p>
+{% endif %}
 <div class="grid">
 {% for p in photos %}
   <div>{{ card(p) }}{{ post(url_for('tray_toggle', sha=p.sha256), "Remove") }}</div>
 {% endfor %}
 </div>
+{% if posts %}
+  <h2>Recent exports</h2>
+  <ul>{% for x in posts %}<li><code>{{ x.post }}</code>: {{ x.photos }} photos, {{ x.last }} UTC</li>{% endfor %}</ul>
+{% endif %}
 {% endblock %}

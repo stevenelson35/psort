@@ -22,6 +22,7 @@ This writes `~/.config/psort/psort.toml`, creates the state database in `~/.loca
 uv run psort run --dry-run          # preview what would be copied
 uv run psort run                    # ingest → cluster → score → curate → faces
 uv run psort review                 # review UI at http://localhost:5000
+uv run psort export go-dogs-go      # post tray → outbox/go-dogs-go/ (upright, ≤2048px, no GPS)
 uv run psort status
 uv run psort verify <batch-folder>  # is this inbox batch safe to delete?
 uv run psort close-calls            # near-tie best picks worth a look

@@ -20,6 +20,7 @@
       {% if p.in_tray %}<span class="pill ok">in tray</span>{% endif %}
       {% if p.people %}<div class="people">{{ p.people }}</div>{% endif %}
       {% if p.tags %}<div class="tags">#{{ p.tags.replace(', ', ' #') }}</div>{% endif %}
+      {% if p.posts %}<div class="muted">posted in: {{ p.posts }}</div>{% endif %}
     </figcaption>
   </figure>
 {%- endmacro %}

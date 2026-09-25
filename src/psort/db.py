@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS tray (
     added_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Which photos went into which post (by outbox folder name).
+CREATE TABLE IF NOT EXISTS exports (
+    sha256       TEXT NOT NULL REFERENCES photos(sha256),
+    post         TEXT NOT NULL,
+    exported_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (sha256, post)
+);
+
 -- Days you've finished reviewing, 'YYYY-MM-DD'.
 CREATE TABLE IF NOT EXISTS reviewed (
     day          TEXT PRIMARY KEY,

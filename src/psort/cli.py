@@ -13,9 +13,11 @@ from . import events as events_mod
 from . import faces as faces_mod
 from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
 from .db import connect
+from .export import ExportError, export
 from .ingest import ingest
 from .library import curate, verify, write_manifest
 from .moments import cluster, score
+from .winpath import windows_path
 
 app = typer.Typer(no_args_is_help=True, help="Local photo curation. See DESIGN.md.")
 events_app = typer.Typer(help="Suggested events, and naming them.", invoke_without_command=True)
@@ -140,6 +142,23 @@ def review(port: Annotated[int, typer.Option(help="Port on 127.0.0.1.")] = 5000)
     create_app(cfg).run(host="127.0.0.1", port=port, threaded=True)
 
 
+@app.command("export")
+def export_cmd(
+    post: Annotated[str, typer.Argument(help="Post name; becomes the outbox folder (e.g. go-dogs-go).")],
+    names: Annotated[list[str] | None, typer.Argument(help="Library names to export instead of the tray.")] = None,
+    keep_tray: Annotated[bool, typer.Option(help="Leave exported photos in the tray.")] = False,
+) -> None:
+    """Export the post tray as web-ready JPEGs (upright, ≤2048px, no location data)."""
+    cfg, conn = _open()
+    try:
+        result = export(cfg, conn, post, names, keep_tray)
+    except (ExportError, ValueError) as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    typer.echo(f"Exported {len(result.files)} photo(s) to {result.folder}")
+    typer.echo(f"In Windows: {windows_path(result.folder)}")
+
+
 @app.command()
 def status() -> None:
     """Library totals."""
@@ -255,7 +274,7 @@ def faces_crops() -> None:
     """Write face thumbnails per person and group, to browse in File Explorer."""
     cfg, conn = _open()
     out = faces_mod.write_crops(cfg, conn)
-    typer.echo(f"Face thumbnails in {out}\nIn Windows: {faces_mod.windows_path(out)}")
+    typer.echo(f"Face thumbnails in {out}\nIn Windows: {windows_path(out)}")
 
 
 @faces_app.command("label")
