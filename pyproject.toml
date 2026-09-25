@@ -1,0 +1,25 @@
+[project]
+name = "psort"
+version = "0.1.0"
+description = "Local photo curation: dedupe, group near-duplicate moments, pick the best shot, organize a private library."
+requires-python = ">=3.12"
+dependencies = [
+    "imagehash>=4.3",
+    "opencv-python-headless>=4.10",
+    "pillow>=11.0",
+    "pillow-heif>=0.20",
+    "typer>=0.15",
+]
+
+[project.scripts]
+psort = "psort.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
