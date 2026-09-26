@@ -1,7 +1,9 @@
 """Local review UI (DESIGN.md §6). Runs on 127.0.0.1 only; never exposed to the network."""
 
+import atexit
 import os
 import secrets
+import threading
 import sqlite3
 from collections import defaultdict
 from datetime import date as calendar_date
@@ -20,10 +22,12 @@ from .. import blog as blog_mod
 from ..config import DEFAULT_CONFIG_PATH, Config
 from ..dates import UNCERTAIN, sql_in
 from ..db import connect
+from ..library import write_manifest
 from ..imaging import upright
 from ..winpath import windows_path
 
 THUMB_SIZES = {320, 1280}
+MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 MB) is rewritten
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -39,6 +43,45 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         if "db" not in g:
             g.db = connect(cfg.db_path)
         return g.db
+
+    # manifest.json is big and lives on OneDrive: write it once things go quiet, not on every click.
+    pending = {"timer": None}
+    pending_lock = threading.Lock()
+
+    def write_manifest_now():
+        with pending_lock:
+            pending["timer"] = None
+        conn = connect(cfg.db_path)
+        try:
+            write_manifest(cfg, conn)
+        finally:
+            conn.close()
+
+    def manifest_later():
+        with pending_lock:
+            if pending["timer"]:
+                pending["timer"].cancel()
+            pending["timer"] = threading.Timer(MANIFEST_DELAY, write_manifest_now)
+            pending["timer"].daemon = True
+            pending["timer"].start()
+
+    def flush_manifest():
+        with pending_lock:
+            timer, pending["timer"] = pending["timer"], None
+        if timer:
+            timer.cancel()
+            write_manifest_now()
+
+    atexit.register(flush_manifest)  # Ctrl+C on `psort review` still leaves an up-to-date manifest
+    app.flush_manifest = flush_manifest
+
+    @app.before_request
+    def defer_manifest():
+        actions.manifest_later = manifest_later
+
+    @app.teardown_request
+    def undefer_manifest(_exc):
+        actions.manifest_later = None
 
     @app.teardown_appcontext
     def close_db(_exc):

@@ -14,14 +14,28 @@ class ActionError(Exception):
     pass
 
 
+# The review UI sets this to write manifest.json in the background a few seconds after the last
+# change (it's ~10 MB on OneDrive); the CLI leaves it unset and writes right away.
+manifest_later = None
+
+
+def _manifest(cfg: Config, conn: sqlite3.Connection) -> None:
+    if manifest_later:
+        manifest_later()
+    else:
+        write_manifest(cfg, conn)
+
+
 def refresh(cfg: Config, conn: sqlite3.Connection, recluster: bool = False) -> None:
-    """Re-derive moments/best picks and move library files to match."""
+    """Re-derive moments/best picks and move just the library files that need to move. Files that
+    stay put aren't re-checked on disk (that's `psort run`'s job), so a click takes a moment,
+    not minutes."""
     if recluster:
         cluster(cfg, conn)
     score(cfg, conn)
-    curate(cfg, conn, log=lambda _: None)
+    curate(cfg, conn, log=lambda _: None, check_files=False)
     highlights.sync(cfg, conn)  # highlight copies follow their originals
-    write_manifest(cfg, conn)
+    _manifest(cfg, conn)
 
 
 def _photo(conn: sqlite3.Connection, sha: str) -> sqlite3.Row:
@@ -90,7 +104,7 @@ def set_tags(cfg: Config, conn: sqlite3.Connection, sha: str, text: str) -> list
     conn.executemany("INSERT INTO tags (sha256, tag) VALUES (?, ?)", [(sha, t) for t in tags])
     conn.commit()
     highlights.sync(cfg, conn)  # tags show as Windows Tags on highlight copies
-    write_manifest(cfg, conn)
+    _manifest(cfg, conn)
     return tags
 
 
@@ -140,7 +154,7 @@ def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
     except highlights.HighlightError as e:
         raise ActionError(str(e)) from e
     highlights.sync(cfg, conn)
-    write_manifest(cfg, conn)
+    _manifest(cfg, conn)
     return now
 
 
@@ -164,5 +178,5 @@ def restore_photo(cfg: Config, conn: sqlite3.Connection, sha: str) -> None:
 
 def empty_trash(cfg: Config, conn: sqlite3.Connection) -> int:
     n = trash.empty(cfg, conn)
-    write_manifest(cfg, conn)
+    _manifest(cfg, conn)
     return n

@@ -165,7 +165,7 @@ class VideoCurateStats:
     missing: list[str] | None = None
 
 
-def curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool = False,
+def curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool = False, check_files: bool = True,
            log: Callable[[str], None] = print) -> VideoCurateStats:
     from .library import _copy_verified, _find_source, _remove_empty_parents  # shared helpers
     from .imaging import sha256_file
@@ -178,7 +178,7 @@ def curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool = False,
         row = current[sha]
         dest = root / target
         existing = root / row["library_path"] if row["library_path"] else None
-        if row["library_path"] == target and dest.exists():
+        if row["library_path"] == target and (not check_files or dest.exists()):
             stats.unchanged += 1
             continue
         if dest.exists():

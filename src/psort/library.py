@@ -106,8 +106,11 @@ def _copy_verified(src: Path, dest: Path, sha: str) -> None:
 
 def curate(
     cfg: Config, conn: sqlite3.Connection, dry_run: bool = False, log: Callable[[str], None] = print,
-    progress: Callable[[int, int], None] | None = None,
+    progress: Callable[[int, int], None] | None = None, check_files: bool = True,
 ) -> CurateStats:
+    """Copy or move files so the library matches the database. check_files=False trusts the
+    database for files that aren't moving: checking ~10,000 files on a Windows/OneDrive drive takes
+    minutes, fine for `psort run` but not for a click in the review UI."""
     assign_names(conn)
     stats = CurateStats()
     lib = cfg.library
@@ -121,7 +124,7 @@ def curate(
         dest = lib / target
         existing = lib / row["library_path"] if row["library_path"] else None
 
-        if row["library_path"] == target and dest.exists():
+        if row["library_path"] == target and (not check_files or dest.exists()):
             stats.unchanged += 1
             continue
 
@@ -160,21 +163,23 @@ def curate(
     # Videos follow the same folder names in their own tree, so an event rename moves both.
     from . import videos as videos_mod
 
-    v = videos_mod.curate(cfg, conn, dry_run=dry_run, log=log)
+    v = videos_mod.curate(cfg, conn, dry_run=dry_run, log=log, check_files=check_files)
     stats.videos_copied, stats.videos_moved = v.copied, v.moved
     stats.missing += v.missing or []
 
     # Live Photo clips follow their photo (same name, video extension), wherever it moves.
-    copied, _, missing = _sync(cfg, conn, cfg.library, "live_clips", _clip_paths(conn), dry_run, log, "Live Photo clip")
+    copied, _, missing = _sync(cfg, conn, cfg.library, "live_clips", _clip_paths(conn), dry_run, log,
+                               "Live Photo clip", check_files)
     stats.clips_copied = copied
     stats.missing += missing
     # Rich Capture packages sit beside their finished photo (same name, .nar).
-    copied, _, missing = _sync(cfg, conn, cfg.library, "rich_packages", _rich_paths(conn), dry_run, log,
-                               "Rich Capture package")
+    copied, _, missing = _sync(cfg, conn, cfg.library, "rich_packages", _rich_paths(conn), dry_run, log, label="Rich Capture package",
+                               check_files=check_files)
     stats.clips_copied += copied
     stats.missing += missing
     # Everything else keeps its original inbox path under unsorted_files/.
-    copied, _, missing = _sync(cfg, conn, cfg.unsorted, "other_files", _other_paths(conn), dry_run, log, "file")
+    copied, _, missing = _sync(cfg, conn, cfg.unsorted, "other_files", _other_paths(conn), dry_run, log, "file",
+                               check_files)
     stats.others_copied = copied
     stats.missing += missing
     shutil.rmtree(cfg.state_dir / "tmp", ignore_errors=True)  # extracted frames, once copied
@@ -236,14 +241,15 @@ def _other_paths(conn: sqlite3.Connection) -> dict[str, str]:
 
 
 def _sync(cfg: Config, conn: sqlite3.Connection, root: Path, table: str, desired: dict[str, str],
-          dry_run: bool, log: Callable[[str], None], label: str) -> tuple[int, int, list[str]]:
+          dry_run: bool, log: Callable[[str], None], label: str,
+          check_files: bool = True) -> tuple[int, int, list[str]]:
     """Copy (from the inbox) or move files so each sha256 in `table` sits at its desired path."""
     copied = moved = 0
     missing: list[str] = []
     current = {r["sha256"]: r["library_path"] for r in conn.execute(f"SELECT sha256, library_path FROM {table}")}
     for sha, target in sorted(desired.items(), key=lambda kv: kv[1]):
         dest, cur = root / target, current.get(sha)
-        if cur == target and dest.exists():
+        if cur == target and (not check_files or dest.exists()):
             continue
         if dest.exists():
             if sha256_file(dest) != sha:

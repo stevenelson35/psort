@@ -255,3 +255,30 @@ def test_dark_mode_is_default(ui):
     assert 'localStorage.getItem("psort-theme") || "dark"' in page and "toggleTheme()" in page
     css = ui.get("/static/style.css").get_data(as_text=True)
     assert '[data-theme="light"]' in css
+
+
+def test_clicks_only_touch_files_that_move(ui, tmp_path):
+    """A pick shouldn't re-check the whole library on disk (minutes on OneDrive); `psort run` does that."""
+    lib = tmp_path / "library"
+    unrelated = lib / "2026/2026-07-04/20260704_101500.jpg"
+    unrelated.unlink()  # something unrelated is missing; a click shouldn't go looking
+    blurry = sha_of(tmp_path, "20260703_145633")
+    ui.post_ok(f"/photo/{blurry['sha256']}/best")
+    assert (lib / "2026/2026-07-03/20260703_145633.jpg").exists()  # the files that moved did move
+    assert not unrelated.exists()
+
+
+def test_manifest_is_written_after_clicks_settle(ui, tmp_path, monkeypatch):
+    import json
+    import time
+
+    import psort.review as review_mod
+
+    manifest = tmp_path / "library/.psort/manifest.json"
+    before = manifest.stat().st_mtime
+    sha = sha_of(tmp_path, "20260703_145640")["sha256"]
+    ui.post_ok(f"/photo/{sha}/tags", tags="later")
+    assert manifest.stat().st_mtime == before  # not during the click
+    ui.application.flush_manifest()  # what the timer (or quitting) does
+    photos = {p["name"]: p for p in json.loads(manifest.read_text())["photos"]}
+    assert photos["20260703_145640"]["tags"] == ["later"]

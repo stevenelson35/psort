@@ -234,7 +234,9 @@ a_library/
     - ☆, tray, tags, fix date, 🗑 delete
     - play the Live clip
   - **★ Favorites** (year/person filters) · **Close calls** ("Pick this") · **Events** (name/through/unname) · **Faces** (name groups; person pages with "Not <name>") · **Videos** · **Undated** (exact date per photo, or **one date for all ticked**) · **🗑 Trash** (Restore / Empty) · **Post tray** (the composer, §8)
-- Every decision updates the library right away (files move, folders rename), along with highlights and the manifest.
+- Every decision updates the library right away (files move, folders rename), along with highlights.
+- **Clicks stay fast:** a decision re-scores in memory and moves only the files it affects. Files that aren't moving are trusted from the database rather than re-checked on disk. Checking all ~10,000 library files on OneDrive took about 2 minutes per click; now a click takes about 0.2 s. `psort run` still verifies every file.
+- **`manifest.json`** (about 10 MB) is written in the background 4 s after the last change, and again when the review page stops.
 - **Thumbnails, posters and face crops** are cached in the state folder, named by content, so they're never stale.
 
 ## 7. Export only (for `blogupdate.html`)
