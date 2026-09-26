@@ -108,6 +108,19 @@ CREATE TABLE IF NOT EXISTS tags (
     PRIMARY KEY (sha256, tag)
 );
 
+-- Your favorites: the best of the best.
+CREATE TABLE IF NOT EXISTS favorites (
+    sha256    TEXT PRIMARY KEY REFERENCES photos(sha256),
+    added_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Web-size copies of favorites that psort has written to highlights/ (so it only ever touches its own files).
+CREATE TABLE IF NOT EXISTS highlights (
+    sha256    TEXT PRIMARY KEY,
+    path      TEXT NOT NULL,           -- relative to the highlights root
+    stamp     TEXT NOT NULL            -- what it was rendered from; re-rendered when this changes
+);
+
 -- Photos picked for the next blog post (exported in the next stage).
 CREATE TABLE IF NOT EXISTS tray (
     sha256    TEXT PRIMARY KEY REFERENCES photos(sha256),

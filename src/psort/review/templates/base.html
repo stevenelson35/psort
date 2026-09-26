@@ -18,6 +18,7 @@
 <body>
   <nav class="top">
     <a href="{{ url_for('index') }}" class="brand">psort</a>
+    <a href="{{ url_for('favorites') }}">★ Favorites{% if counts.favorites %} <span class="pill">{{ counts.favorites }}</span>{% endif %}</a>
     <a href="{{ url_for('close_calls') }}">Close calls{% if counts.close_calls %} <span class="pill warn">{{ counts.close_calls }}</span>{% endif %}</a>
     <a href="{{ url_for('events') }}">Events</a>
     <a href="{{ url_for('faces') }}">Faces{% if counts.unnamed_groups %} <span class="pill">{{ counts.unnamed_groups }}</span>{% endif %}</a>

@@ -27,6 +27,7 @@ psort is a local photo curation tool. It takes the chaotic, date-dumped folders 
 | **Library** | `/mnt/c/Users/steve/OneDrive/Pictures/psort-library/` | Yes | The curated master library (§5.4) |
 | **Videos** | `/mnt/c/Users/steve/OneDrive/photos/psort/videos/` (beside the library) | Yes | Videos, in the same year/day/event folders as the library (§5.8) |
 | **Unsorted files** | `…/psort/unsorted_files/` (beside the library) | Yes | Every non-photo, non-video file, under its original inbox path with spaces turned into hyphens |
+| **Highlights** | `…/psort/highlights/` (beside the library) | Yes | Web-size copies of your ★ favorites, kept in sync automatically (§5.9) |
 | **Outbox** | `/mnt/c/Users/steve/Pictures/psort-outbox/` | Yes | Web-ready exports for blog posts, one folder per post |
 | **State** | `~/.local/share/psort/` (inside WSL) | Yes | SQLite database and thumbnail/hash cache |
 
@@ -201,6 +202,21 @@ psort-library/
   - A **Videos** page lists every video by folder.
   - The Library page marks folders that contain videos.
 - Videos picked up before this feature existed (previously "unsupported") are ingested on the next run.
+
+### 5.9 Favorites and highlights
+
+- **Favorites:** click ☆ on any photo card or details page to star it. The **★ Favorites** page lists them newest first and can filter by year and person.
+- **The `highlights/` folder:** psort keeps a web-size JPEG of every favorite here: 2048px, upright, about 0.5 MB, with GPS stripped. It's browsable in File Explorer, Windows Photos, or on a phone through OneDrive, without keeping a second full-size copy.
+- **Finding the original:**
+  - A highlight uses the **same folder path and filename** as its original in the library, dropping any `_alternates` or `_duplicates` level. For example, `highlights/2016/2016-04-17/20160417_062036.jpg` ↔ `a_library/2016/2016-04-17/20160417_062036.jpg`.
+  - In Windows Properties, its **Title/Subject** is `psort library: <original's path>`.
+  - Its **Tags** are the people in it plus your psort tags, so File Explorer can search by person.
+- **Always up to date:**
+  - un-favoriting deletes the copy and any empty folders
+  - moving the original (best pick, event name, date fix) moves the copy
+  - changing people or tags re-renders it
+  - a copy deleted by accident is rewritten on the next `psort run`
+- psort only touches files it wrote there. Anything else you put in `highlights/` is left alone.
 
 ## 6. Review UI
 

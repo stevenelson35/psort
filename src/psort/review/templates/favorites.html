@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card %}
+{% block title %}Favorites{% endblock %}
+{% block content %}
+<h1>★ Favorites</h1>
+<p class="muted">Your best of the best. Each one also has a web-size copy in <code>{{ root }}</code>, in the same
+  folders and with the same name as its original in <code>{{ library }}</code>, so you can browse them anywhere.
+  In Windows, a copy's <em>Title</em> shows its original's location and its <em>Tags</em> list the people and tags.</p>
+<form method="get" class="row">
+  <select name="year"><option value="">All years</option>
+    {% for y in years %}<option {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
+  <select name="person"><option value="">Everyone</option>
+    {% for p in people %}<option {% if p == person %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+  <button>Filter</button>
+  {% if year or person %}<a href="{{ url_for('favorites') }}">clear</a>{% endif %}
+  <span class="muted">{{ photos|length }} photo{{ "" if photos|length == 1 else "s" }}</span>
+</form>
+{% if not photos %}<p>{% if year or person %}No favorites match.{% else %}No favorites yet. Click ☆ on any photo.{% endif %}</p>{% endif %}
+<div class="grid">
+{% for p in photos %}
+  <div>
+    {{ card(p) }}
+    <div class="muted path" title="Original in the library">📁 {{ library_path(p.library_path) }}</div>
+  </div>
+{% endfor %}
+</div>
+{% endblock %}

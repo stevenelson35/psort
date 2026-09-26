@@ -4,6 +4,7 @@ rearranges the library to match."""
 import sqlite3
 from datetime import date, datetime, time
 
+from . import highlights
 from .config import Config
 from .library import assign_names, curate, write_manifest
 from .moments import cluster, score
@@ -19,6 +20,7 @@ def refresh(cfg: Config, conn: sqlite3.Connection, recluster: bool = False) -> N
         cluster(cfg, conn)
     score(cfg, conn)
     curate(cfg, conn, log=lambda _: None)
+    highlights.sync(cfg, conn)  # highlight copies follow their originals
     write_manifest(cfg, conn)
 
 
@@ -87,6 +89,7 @@ def set_tags(cfg: Config, conn: sqlite3.Connection, sha: str, text: str) -> list
     conn.execute("DELETE FROM tags WHERE sha256 = ?", (sha,))
     conn.executemany("INSERT INTO tags (sha256, tag) VALUES (?, ?)", [(sha, t) for t in tags])
     conn.commit()
+    highlights.sync(cfg, conn)  # tags show as Windows Tags on highlight copies
     write_manifest(cfg, conn)
     return tags
 
@@ -114,3 +117,14 @@ def toggle_reviewed(conn: sqlite3.Connection, day: str) -> bool:
     conn.execute("INSERT INTO reviewed (day) VALUES (?)", (day,))
     conn.commit()
     return True
+
+
+def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
+    """Star / unstar a photo; its highlights/ copy appears or disappears to match."""
+    try:
+        now = highlights.toggle_favorite(conn, sha)
+    except highlights.HighlightError as e:
+        raise ActionError(str(e)) from e
+    highlights.sync(cfg, conn)
+    write_manifest(cfg, conn)
+    return now

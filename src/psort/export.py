@@ -19,6 +19,8 @@ QUALITY = 85
 _KEEP_IFD0 = {271: "Make", 272: "Model", 306: "DateTime"}
 _KEEP_EXIF = {36867: "DateTimeOriginal", 36881: "OffsetTimeOriginal"}
 _EXIF_IFD = 0x8769
+_IMAGE_DESCRIPTION = 270  # Windows: Title / Subject
+_XP_KEYWORDS = 0x9C9E  # Windows: Tags
 
 
 class ExportError(Exception):
@@ -43,10 +45,15 @@ def _clean_exif(src: Image.Exif) -> Image.Exif:
     return out
 
 
-def render(src: Path, dest: Path) -> None:
-    """Write one export: EXIF-rotated, flattened onto white if transparent, resized, re-encoded."""
+def render(src: Path, dest: Path, description: str | None = None, keywords: list[str] | None = None) -> None:
+    """Write one export: EXIF-rotated, flattened onto white if transparent, resized, re-encoded.
+    `description` and `keywords` show in Windows as the file's Title/Subject and Tags."""
     with Image.open(src) as im:
         exif = _clean_exif(im.getexif())
+        if description:
+            exif[_IMAGE_DESCRIPTION] = description
+        if keywords:
+            exif[_XP_KEYWORDS] = ";".join(keywords).encode("utf-16-le") + b"\0\0"
         icc = im.info.get("icc_profile")  # keeps colors right (e.g. iPhone Display P3)
         im.draft("RGB", (MAX_EDGE, MAX_EDGE))
         img = ImageOps.exif_transpose(im)

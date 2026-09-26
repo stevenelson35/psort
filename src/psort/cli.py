@@ -11,6 +11,7 @@ import typer
 from . import config as config_mod
 from . import events as events_mod
 from . import faces as faces_mod
+from . import highlights as highlights_mod
 from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
 from .dates import UNCERTAIN, sql_in
 from .db import connect
@@ -133,6 +134,7 @@ def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; sho
     _curate(cfg, conn, dry_run)
     if not dry_run:
         _faces(cfg, conn)
+        _highlights(cfg, conn)
 
 
 @app.command()
@@ -172,6 +174,7 @@ def status() -> None:
         "Alternates": "SELECT COUNT(*) FROM photos WHERE is_best = 0 AND duplicate_of IS NULL",
         "Visual duplicates": "SELECT COUNT(*) FROM photos WHERE duplicate_of IS NOT NULL",
         "Close calls": "SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1",
+        "Favorites": "SELECT COUNT(*) FROM favorites",
         "Named events": "SELECT COUNT(*) FROM named_events",
         "Named people": "SELECT COUNT(*) FROM people",
         "Faces found": "SELECT COUNT(*) FROM faces",
@@ -191,6 +194,15 @@ def status() -> None:
         typer.echo(f"{label + ':':19}{conn.execute(sql).fetchone()[0]}")
     typer.echo(f"{'Face detection:':19}{'on' if cfg.face_model.exists() else 'off (model not downloaded)'}")
     typer.echo(f"{'Face recognition:':19}{'on' if cfg.recognition_model.exists() else 'off (model not downloaded)'}")
+
+
+@app.command("highlights")
+def highlights_cmd() -> None:
+    """Bring highlights/ up to date with your favorites (also part of `psort run`)."""
+    cfg, conn = _open()
+    _highlights(cfg, conn)
+    n = conn.execute("SELECT COUNT(*) FROM highlights").fetchone()[0]
+    typer.echo(f"{n} favorite(s) in {cfg.highlights}\nIn Windows: {windows_path(cfg.highlights)}")
 
 
 @app.command("close-calls")
@@ -361,6 +373,12 @@ def _cluster(cfg: Config, conn: sqlite3.Connection) -> None:
     moments = cluster(cfg, conn)
     copies = conn.execute("SELECT COUNT(*) FROM photos WHERE duplicate_of IS NOT NULL").fetchone()[0]
     typer.echo(f"Moments: {moments} ({copies} visual duplicates set aside in _duplicates)")
+
+
+def _highlights(cfg: Config, conn: sqlite3.Connection) -> None:
+    s = highlights_mod.sync(cfg, conn, log=typer.echo)
+    if s.written or s.moved or s.removed:
+        typer.echo(f"Highlights: {s.written} written, {s.moved} moved, {s.removed} removed → {cfg.highlights}")
 
 
 def _faces(cfg: Config, conn: sqlite3.Connection) -> None:

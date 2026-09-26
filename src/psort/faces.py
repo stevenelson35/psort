@@ -74,7 +74,10 @@ def scan(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = pri
 def _similarities(a: np.ndarray, b: np.ndarray):
     """Yield (row offset, cosine-similarity block) for a against b, BLOCK rows at a time."""
     for i in range(0, len(a), BLOCK):
-        yield i, a[i : i + BLOCK] @ b.T
+        # Unit vectors, so results are in [-1, 1]; OpenBLAS can report a stale overflow flag left
+        # by earlier native code (e.g. OpenCV), which isn't about this product.
+        with np.errstate(over="ignore", invalid="ignore"):
+            yield i, a[i : i + BLOCK] @ b.T
 
 
 def assign(cfg: Config, conn: sqlite3.Connection) -> None:
@@ -177,6 +180,7 @@ def label(cfg: Config, conn: sqlite3.Connection, name: str, cluster: int | None 
     )
     conn.commit()
     assign(cfg, conn)
+    _sync_highlights(cfg, conn)
     return len(ids)
 
 
@@ -197,6 +201,14 @@ def unlabel(cfg: Config, conn: sqlite3.Connection, face_ids: list[int]) -> None:
     conn.execute(f"DELETE FROM face_rejections WHERE person_id IN ({orphans})")
     conn.execute(f"DELETE FROM people WHERE id IN ({orphans})")
     conn.commit()
+    _sync_highlights(cfg, conn)
+
+
+def _sync_highlights(cfg: Config, conn: sqlite3.Connection) -> None:
+    """People's names show as Windows Tags on highlight copies, so refresh them."""
+    from .highlights import sync
+
+    sync(cfg, conn)
 
 
 def _check_faces(conn: sqlite3.Connection, ids: list[int]) -> None:

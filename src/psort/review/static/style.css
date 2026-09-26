@@ -75,3 +75,6 @@ nav.top .theme { margin-left: auto; padding: .15rem .55rem; }
 .bulk { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .6rem; position: sticky; top: 3rem; z-index: 1; }
 .tick { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .2rem; cursor: pointer; }
 details.live video { width: 100%; max-height: 360px; background: var(--photo-bg); margin-top: .3rem; }
+button.star { background: none; border: none; font-size: 1.15rem; line-height: 1; padding: 0 .25rem; color: var(--muted); }
+button.star.on { color: var(--warn); }
+.shot .meta button.star { font-size: .95rem; border: 1px solid var(--line); padding: .25rem .6rem; }

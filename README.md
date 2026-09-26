@@ -26,6 +26,7 @@ uv run psort export go-dogs-go      # post tray → outbox/go-dogs-go/ (upright,
 uv run psort status
 uv run psort verify <batch-folder>  # is this inbox batch safe to delete?
 uv run psort close-calls            # near-tie best picks worth a look
+uv run psort highlights             # sync highlights/ with your ★ favorites (also part of run)
 
 uv run psort events                               # suggested events
 uv run psort events name 20260703_145633 birthday-party

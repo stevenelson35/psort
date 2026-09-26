@@ -31,6 +31,7 @@ class Config:
     state_dir: Path = DEFAULT_STATE_DIR
     videos_dir: Path | None = None  # default: a videos/ folder beside the library
     unsorted_dir: Path | None = None  # default: an unsorted_files/ folder beside the library
+    highlights_dir: Path | None = None  # default: a highlights/ folder beside the library
     burst_gap_seconds: float = 10.0
     phash_threshold: int = 10
     close_call_margin: float = 0.05
@@ -48,6 +49,10 @@ class Config:
     @property
     def unsorted(self) -> Path:
         return self.unsorted_dir or self.library.parent / "unsorted_files"
+
+    @property
+    def highlights(self) -> Path:
+        return self.highlights_dir or self.library.parent / "highlights"
 
     @property
     def db_path(self) -> Path:
@@ -86,6 +91,7 @@ def load(path: Path) -> Config:
             state_dir=Path(paths.get("state_dir", DEFAULT_STATE_DIR)).expanduser(),
             videos_dir=Path(paths["videos"]).expanduser() if "videos" in paths else None,
             unsorted_dir=Path(paths["unsorted"]).expanduser() if "unsorted" in paths else None,
+            highlights_dir=Path(paths["highlights"]).expanduser() if "highlights" in paths else None,
             burst_gap_seconds=float(cluster.get("burst_gap_seconds", 10.0)),
             phash_threshold=int(cluster.get("phash_threshold", 10)),
             close_call_margin=float(cluster.get("close_call_margin", 0.05)),
@@ -115,6 +121,8 @@ outbox = {q(outbox)}
 videos = {q(videos or library.parent / "videos")}
 # Every other file from the inbox (helper files, documents, unreadable files), under its original path.
 unsorted = {q(library.parent / "unsorted_files")}
+# Small copies of your favorites, kept in sync automatically (same folders and names as the library).
+highlights = {q(library.parent / "highlights")}
 state_dir = {q(state_dir)}
 
 [cluster]

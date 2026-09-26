@@ -65,6 +65,7 @@ def create_app(cfg: Config) -> Flask:
                 "close_calls": one("SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1"),
                 "undated": one(f"SELECT COUNT(*) FROM photos WHERE date_source IN {sql_in(UNCERTAIN)}"),
                 "tray": one("SELECT COUNT(*) FROM tray"),
+                "favorites": one("SELECT COUNT(*) FROM favorites"),
                 "videos": one("SELECT COUNT(*) FROM videos WHERE library_path IS NOT NULL"),
                 "unnamed_groups": one("SELECT COUNT(DISTINCT cluster) FROM faces WHERE cluster IS NOT NULL"),
             },
@@ -207,6 +208,32 @@ def create_app(cfg: Config) -> Flask:
     @app.post("/moment/<moment_id>/auto")
     def auto(moment_id):
         return act(actions.clear_pick, cfg, db(), moment_id)
+
+    @app.post("/photo/<sha>/favorite")
+    def favorite(sha):
+        return act(actions.toggle_favorite, cfg, db(), sha)
+
+    @app.get("/favorites")
+    def favorites():
+        year = request.args.get("year", "")
+        person = request.args.get("person", "")
+        rows = db().execute(
+            f"""SELECT {CARD_COLUMNS}, p.taken_at, h.path AS highlight FROM photos p
+                JOIN favorites fav ON fav.sha256 = p.sha256
+                LEFT JOIN highlights h ON h.sha256 = p.sha256
+                WHERE (? = '' OR substr(p.taken_at, 1, 4) = ?)
+                  AND (? = '' OR EXISTS (SELECT 1 FROM faces f JOIN people pe ON pe.id = f.person_id
+                                         WHERE f.sha256 = p.sha256 AND pe.name = ?))
+                ORDER BY p.taken_at DESC, p.name""",
+            (year, year, person, person),
+        ).fetchall()
+        years = [r[0] for r in db().execute(
+            "SELECT DISTINCT substr(p.taken_at, 1, 4) FROM photos p JOIN favorites f ON f.sha256 = p.sha256 ORDER BY 1 DESC")]
+        people = [r[0] for r in db().execute(
+            """SELECT DISTINCT pe.name FROM favorites fav JOIN faces f ON f.sha256 = fav.sha256
+               JOIN people pe ON pe.id = f.person_id ORDER BY pe.name""")]
+        return render_template("favorites.html", photos=rows, years=years, people=people, year=year, person=person,
+                               root=windows_path(cfg.highlights), library=windows_path(cfg.library))
 
     @app.post("/photo/<sha>/tray")
     def tray_toggle(sha):
@@ -357,6 +384,8 @@ def create_app(cfg: Config) -> Flask:
 
     app.jinja_env.globals["pretty_folder"] = pretty_folder
     app.jinja_env.globals["video_path"] = lambda rel: windows_path(cfg.videos / rel)
+    app.jinja_env.globals["library_path"] = lambda rel: windows_path(cfg.library / rel)
+    app.jinja_env.globals["highlight_path"] = lambda rel: windows_path(cfg.highlights / rel)
     app.jinja_env.globals["playable"] = lambda ext: ext.lower() in videos_mod.PLAYABLE
     app.jinja_env.filters["duration"] = _duration
     return app
@@ -374,7 +403,8 @@ CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.cl
     (SELECT group_concat(tag, ', ') FROM (SELECT tag FROM tags WHERE sha256 = p.sha256 ORDER BY tag)) AS tags,
     (SELECT group_concat(post, ', ') FROM (SELECT post FROM exports WHERE sha256 = p.sha256 ORDER BY post)) AS posts,
     (SELECT c.sha256 FROM live_clips c JOIN sources s ON s.path = c.photo_path
-        WHERE s.sha256 = p.sha256 LIMIT 1) AS live_clip"""
+        WHERE s.sha256 = p.sha256 LIMIT 1) AS live_clip,
+    EXISTS (SELECT 1 FROM favorites fv WHERE fv.sha256 = p.sha256) AS favorite"""
 
 
 def folder_key(library_path: str) -> str:

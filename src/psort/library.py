@@ -320,8 +320,10 @@ def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
     tags = {}
     for r in conn.execute("SELECT sha256, tag FROM tags ORDER BY tag"):
         tags.setdefault(r["sha256"], []).append(r["tag"])
+    favorites = {r["sha256"] for r in conn.execute("SELECT sha256 FROM favorites")}
     photos = [
-        {**dict(r), "people": people.get(r["sha256"], []), "tags": tags.get(r["sha256"], [])}
+        {**dict(r), "people": people.get(r["sha256"], []), "tags": tags.get(r["sha256"], []),
+         "favorite": r["sha256"] in favorites}
         for r in conn.execute("SELECT * FROM photos ORDER BY taken_at, name")
     ]
     events = [dict(r) for r in named_ranges(conn)]
