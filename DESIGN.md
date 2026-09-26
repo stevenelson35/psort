@@ -170,9 +170,14 @@ a_library/
 ### 5.7 Faces
 
 - **Scan:** after arranging, each new library photo is scanned. YuNet detects faces (≥32px at analysis size), and **SFace** turns each into a 128-number embedding. The models are downloaded once into the state folder.
-- **Grouping:** unnamed faces are linked to their 10 nearest look-alikes above `cluster_threshold` (0.5). Groups are connected components, named after their smallest face ID.
+- **Grouping:** unnamed faces are linked to their 10 nearest look-alikes above `cluster_threshold` (0.5), but **only when the link is mutual** (each is among the other's nearest). Groups are the connected components, named after their smallest face ID.
+  - One-way links let a face that resembles two people chain them together. On the user's library, the old rule produced one mixed group of 3,558 faces. With mutual links, the largest groups are 548 and 372, and there are 480 real groups instead of 203.
 - **Naming:**
-  - Name a group, or individual faces. Faces above `match_threshold` (0.45) similarity then get that name automatically (`auto`).
+  - Group faces are listed **most typical first** (closest to the group's average face), so the odd ones out come last.
+  - **Faces page:** shows 8 faces per group. **Name whole group** appears only when the whole group is visible; bigger groups get **See all N faces**.
+  - **Group page:** shows up to 400 faces with tick/untick-all. **Name ticked faces** names only those; unticked faces stay undecided, with no rejection recorded.
+  - **"Name ticked only" on the Faces page** records the unticked *shown* faces as rejections.
+  - Faces above `match_threshold` (0.45) similarity to a named person get that name automatically (`auto`). Those are listed first, least certain first, on the person's page.
   - Unticked faces and "Not <name>" are stored as **rejections**, so they're never auto-matched to that person again.
 - **Privacy:** embeddings stay **only** in the WSL database. The manifest and highlight copies carry only people's names.
 - **Uses:** "who's in this photo," the Favorites person filter, Windows Tags on highlights, and the post tray's "these show people" warning.

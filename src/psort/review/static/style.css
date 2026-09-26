@@ -93,3 +93,5 @@ pre.post-text { background: var(--surface); border: 1px solid var(--line); borde
   white-space: pre-wrap; font-size: .85rem; }
 button.danger { border-color: var(--error); color: var(--error); }
 button.danger:hover { background: var(--error-bg); }
+.sticky-bar { position: sticky; top: 3rem; background: var(--surface); padding: .5rem; border-radius: 8px;
+  border: 1px solid var(--line); z-index: 1; }

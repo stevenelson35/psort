@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Face group {{ cluster }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('faces') }}">← Faces</a></p>
+<h1>Group {{ cluster }} <span class="muted">· {{ total }} faces</span></h1>
+<p class="muted">Most typical face first; faces further down are less alike and may be someone else. Tick the faces that
+  are the same person and name them. <strong>Unticked faces are left undecided</strong>: they stay unnamed, and psort
+  regroups them. Click a face's "photo" link to see it in context.
+  {% if total > faces|length %}Showing the first {{ faces|length }}; name some and the rest will move up.{% endif %}</p>
+<datalist id="people">{% for p in people %}<option value="{{ p }}">{% endfor %}</datalist>
+<form method="post" action="{{ url_for('faces_label') }}" class="group">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="next" value="{{ request.path }}">
+  <div class="row sticky-bar">
+    <input name="name" list="people" placeholder="Who is this?" required>
+    <button class="ok">Name ticked faces</button>
+    <button type="button" onclick="document.querySelectorAll('input[name=face]').forEach(c => c.checked = true); count()">Tick all</button>
+    <button type="button" onclick="document.querySelectorAll('input[name=face]').forEach(c => c.checked = false); count()">Untick all</button>
+    <span class="muted" id="ticked">0 ticked</span>
+  </div>
+  <div class="faces">
+    {% for fid in faces %}
+      <figure class="face-card">
+        <label class="face"><input type="checkbox" name="face" value="{{ fid }}" onchange="count()">
+          <img src="{{ url_for('face_thumb', face_id=fid) }}" loading="lazy" alt="face {{ fid }}"></label>
+        {% if moments.get(fid) %}<figcaption><a href="{{ url_for('moment', moment_id=moments[fid]) }}" target="_blank">photo</a></figcaption>{% endif %}
+      </figure>
+    {% endfor %}
+  </div>
+</form>
+<script>
+  function count() {
+    document.getElementById("ticked").textContent =
+      document.querySelectorAll("input[name=face]:checked").length + " ticked";
+  }
+</script>
+{% endblock %}

@@ -121,7 +121,7 @@ def assign(cfg: Config, conn: sqlite3.Connection) -> None:
             similarity[chunk[hit]] = best_sim[hit]
 
     # Group the still-unnamed faces: link each to its nearest look-alikes above the cluster
-    # threshold, then take connected components. Nearest-k keeps this fast with many faces.
+    # threshold (mutual links only), then take connected components. Nearest-k keeps this fast.
     unknown = np.flatnonzero(person == -1)
     cluster = np.full(len(rows), -1)
     if len(unknown):
@@ -133,7 +133,10 @@ def assign(cfg: Config, conn: sqlite3.Connection) -> None:
             src.append(np.repeat(np.arange(off, off + len(sims)), k)[keep.ravel()])
             dst.append(nn.ravel()[keep.ravel()])
         src, dst = np.concatenate(src), np.concatenate(dst)
-        graph = coo_matrix((np.ones(len(src)), (src, dst)), shape=(len(unknown), len(unknown)))
+        links = coo_matrix((np.ones(len(src)), (src, dst)), shape=(len(unknown), len(unknown))).tocsr()
+        # Keep only mutual look-alikes (each among the other's nearest). One-way links let chains
+        # like A~B~C pull different people into one big mixed group.
+        graph = links.multiply(links.T)
         _, component = connected_components(graph, directed=False)
         # Name each group after its smallest face id, so ids stay put as long as that face does.
         group_id = np.full(component.max() + 1, np.iinfo(np.int64).max)
@@ -286,3 +289,17 @@ def crop_face(cfg: Config, face: sqlite3.Row, size: int = 160) -> Image.Image | 
     crop = small.crop(box)
     crop.thumbnail((size, size), Image.LANCZOS)
     return crop
+
+
+def group_faces(conn: sqlite3.Connection, cluster: int) -> list[int]:
+    """Face ids in an unnamed group, most typical first (closest to the group's average face), so a
+    group that mixes people shows its main person first and the odd ones out last."""
+    rows = conn.execute("SELECT id, embedding FROM faces WHERE cluster = ? ORDER BY id", (cluster,)).fetchall()
+    if not rows:
+        return []
+    emb = np.stack([np.frombuffer(r["embedding"], np.float32) for r in rows])
+    center = emb.mean(axis=0)
+    center /= np.linalg.norm(center) or 1.0
+    with np.errstate(over="ignore", invalid="ignore"):
+        order = np.argsort(-(emb @ center))
+    return [rows[i]["id"] for i in order]

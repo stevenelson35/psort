@@ -141,3 +141,32 @@ def test_old_database_is_upgraded(tmp_path):
     conn = connect(path)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(photos)")}
     assert {"close_call", "faces_scanned"} <= cols
+
+
+def test_an_in_between_face_does_not_merge_two_people(conn, cfg):
+    """One face resembling two people used to chain them into one mixed group."""
+    rng = np.random.default_rng(7)
+    a, b = rng.normal(size=128), rng.normal(size=128)
+    vectors = [a + rng.normal(scale=0.1, size=128) for _ in range(12)]
+    vectors += [b + rng.normal(scale=0.1, size=128) for _ in range(12)]
+    vectors.append(a / np.linalg.norm(a) + b / np.linalg.norm(b))  # looks a bit like both
+    for i, vec in enumerate(vectors):
+        vec = (vec / np.linalg.norm(vec)).astype(np.float32)
+        conn.execute("INSERT INTO photos (sha256, ext, taken_at, date_source, phash, sharpness, exposure) "
+                     "VALUES (?, '.jpg', '2026-07-03T10:00:00', 'exif', '0', 1, 1)", (f"p{i}",))
+        conn.execute("INSERT INTO faces (sha256, x, y, w, h, confidence, embedding) VALUES (?, 0, 0, .1, .1, .9, ?)",
+                     (f"p{i}", vec.tobytes()))
+    conn.commit()
+    assign(cfg, conn)
+    groups = clusters(conn)
+    assert sorted(len(g) for g in groups) == [1, 12, 12]
+
+
+def test_group_faces_lists_most_typical_first(conn, cfg):
+    from psort.faces import group_faces
+
+    truth = add_faces(conn, {"a": 6})
+    assign(cfg, conn)
+    cluster = conn.execute("SELECT cluster FROM faces LIMIT 1").fetchone()[0]
+    ids = group_faces(conn, cluster)
+    assert sorted(ids) == sorted(truth)

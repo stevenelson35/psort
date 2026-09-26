@@ -282,3 +282,30 @@ def test_manifest_is_written_after_clicks_settle(ui, tmp_path, monkeypatch):
     ui.application.flush_manifest()  # what the timer (or quitting) does
     photos = {p["name"]: p for p in json.loads(manifest.read_text())["photos"]}
     assert photos["20260703_145640"]["tags"] == ["later"]
+
+
+def test_big_face_group_page_names_only_ticked_faces(ui, tmp_path):
+    conn = db(tmp_path)
+    rng = np.random.default_rng(3)
+    center = rng.normal(size=128)
+    photos = [r["sha256"] for r in conn.execute("SELECT sha256 FROM photos ORDER BY name")]
+    for i in range(10):  # a group bigger than the 8 shown on the Faces page
+        vec = center + rng.normal(scale=.15, size=128)
+        vec = (vec / np.linalg.norm(vec)).astype(np.float32)
+        conn.execute("INSERT INTO faces (sha256, x, y, w, h, confidence, embedding) VALUES (?, .3, .3, .3, .3, .9, ?)",
+                     (photos[i % len(photos)], vec.tobytes()))
+    conn.commit()
+    assign(ui.cfg, conn)
+    cluster = conn.execute("SELECT cluster FROM faces LIMIT 1").fetchone()[0]
+
+    page = text(ui.get("/faces"))
+    assert "See all 10 faces" in page
+    assert f'name="group" value="{cluster}"' not in page  # can't name faces you haven't seen
+
+    group = text(ui.get(f"/faces/group/{cluster}"))
+    assert group.count('name="face"') == 10 and "Unticked faces are left undecided" in group
+    ticked = re.findall(r'name="face" value="(\d+)"', group)[:3]
+    ui.post_ok("/faces/label", name="Alice", face=ticked, next=f"/faces/group/{cluster}")
+    rows = {r["id"]: r for r in conn.execute("SELECT id, label_source FROM faces")}
+    assert all(rows[int(i)]["label_source"] == "user" for i in ticked)
+    assert conn.execute("SELECT COUNT(*) FROM face_rejections").fetchone()[0] == 0  # unticked: undecided

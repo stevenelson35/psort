@@ -27,6 +27,7 @@ from ..imaging import upright
 from ..winpath import windows_path
 
 THUMB_SIZES = {320, 1280}
+GROUP_PAGE_LIMIT = 400  # faces shown at once on a group's page
 MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 MB) is rewritten
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
@@ -423,13 +424,23 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     @app.get("/faces")
     def faces():
         people, groups = faces_mod.summary(db(), top=40)
-        samples = {
-            g["cluster"]: [r["id"] for r in db().execute(
-                "SELECT id FROM faces WHERE cluster = ? ORDER BY confidence DESC LIMIT 8", (g["cluster"],))]
-            for g in groups
-        }
+        samples = {g["cluster"]: faces_mod.group_faces(db(), g["cluster"])[:8] for g in groups}
         ids = {r["name"]: r["id"] for r in db().execute("SELECT id, name FROM people")}
         return render_template("faces.html", people=people, groups=groups, samples=samples, person_ids=ids)
+
+    @app.get("/faces/group/<int:cluster>")
+    def face_group(cluster):
+        ids = faces_mod.group_faces(db(), cluster)
+        if not ids:
+            flash("That group has changed (its faces were named or regrouped).", "ok")
+            return redirect(url_for("faces"))
+        shown = ids[:GROUP_PAGE_LIMIT]
+        moments = {r["id"]: r["moment_id"] for r in db().execute(
+            f"SELECT f.id, p.moment_id FROM faces f JOIN photos p ON p.sha256 = f.sha256 "
+            f"WHERE f.id IN ({','.join('?' * len(shown))})", shown)}
+        people = [r["name"] for r in db().execute("SELECT name FROM people ORDER BY name")]
+        return render_template("face_group.html", cluster=cluster, faces=shown, total=len(ids),
+                               moments=moments, people=people)
 
     @app.get("/faces/person/<int:person_id>")
     def person(person_id):
