@@ -44,13 +44,28 @@ CREATE TABLE IF NOT EXISTS videos (
     first_seen   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- iPhone Live Photo clips, kept beside their photo in the library (same name, video extension).
+CREATE TABLE IF NOT EXISTS live_clips (
+    sha256       TEXT PRIMARY KEY,
+    ext          TEXT NOT NULL,
+    photo_path   TEXT NOT NULL,            -- inbox-relative path of the paired photo
+    library_path TEXT                      -- relative to the library root
+);
+
+-- Everything that isn't a photo or video (helper files, documents, unreadable files), copied
+-- to unsorted_files/ under its original folder path so nothing from the inbox is ever lost.
+CREATE TABLE IF NOT EXISTS other_files (
+    sha256       TEXT PRIMARY KEY,
+    library_path TEXT                      -- relative to the unsorted_files root
+);
+
 -- Every file seen in the inbox, including duplicates and skipped files.
 CREATE TABLE IF NOT EXISTS sources (
     path    TEXT PRIMARY KEY,              -- relative to inbox
     batch   TEXT NOT NULL,
     size    INTEGER NOT NULL,
     mtime   REAL NOT NULL,
-    status  TEXT NOT NULL,                 -- image | video | livephoto | sidecar | skipped | error
+    status  TEXT NOT NULL,                 -- image | video | livephoto | sidecar | other | error | junk
     reason  TEXT,
     sha256  TEXT REFERENCES photos(sha256)
 );

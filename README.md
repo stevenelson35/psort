@@ -36,7 +36,12 @@ uv run psort faces crops                          # thumbnails to browse in File
 uv run psort faces label Steve --group 4
 ```
 
-Videos are copied to `videos/` beside the library, using the same folder names, and show up on each day's page in the review UI.
+Nothing from the inbox is lost:
+- **Photos** go to the library, with Live Photo clips beside their photo.
+- **Videos** go to `videos/`, with the same folder names.
+- **Everything else** goes to `unsorted_files/`.
+
+Run `uv run psort verify` to check the whole inbox before deleting it.
 
 psort never writes to the inbox. Delete a batch yourself once `verify` says it's safe.
 

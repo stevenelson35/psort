@@ -4,6 +4,7 @@ import os
 import secrets
 import sqlite3
 from collections import defaultdict
+from datetime import date as calendar_date
 from datetime import datetime
 from pathlib import Path
 
@@ -224,6 +225,19 @@ def create_app(cfg: Config) -> Flask:
             return back("/undated")
         return act(actions.set_date, cfg, db(), sha, when, default="/undated")
 
+    @app.post("/undated/set-day")
+    def set_day():
+        try:
+            day = calendar_date.fromisoformat(request.form.get("day", ""))  # `date` is a route below
+        except ValueError:
+            flash("Pick a date.", "error")
+            return back("/undated")
+
+        def run():
+            n = actions.set_day(cfg, db(), request.form.getlist("photo"), day)
+            flash(f"Set {n} photo(s) to {day:%a %-d %b %Y}.", "ok")
+        return act(run, default="/undated")
+
     @app.post("/day/<day>/reviewed")
     def reviewed(day):
         return act(actions.toggle_reviewed, db(), day)
@@ -319,6 +333,13 @@ def create_app(cfg: Config) -> Flask:
             _save_atomic(img, out)
         return send_file(out, mimetype="image/jpeg", max_age=86400)
 
+    @app.get("/clip/<sha>")
+    def live_clip(sha):
+        row = db().execute("SELECT library_path FROM live_clips WHERE sha256 = ?", (sha,)).fetchone()
+        if row is None or row["library_path"] is None or not (cfg.library / row["library_path"]).exists():
+            abort(404)
+        return send_file(cfg.library / row["library_path"], conditional=True, max_age=0)
+
     @app.get("/face/<int:face_id>.jpg")
     def face_thumb(face_id):
         row = db().execute(
@@ -351,7 +372,9 @@ CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.cl
     (SELECT group_concat(name, ', ') FROM (SELECT DISTINCT pe.name FROM faces f
         JOIN people pe ON pe.id = f.person_id WHERE f.sha256 = p.sha256 ORDER BY pe.name)) AS people,
     (SELECT group_concat(tag, ', ') FROM (SELECT tag FROM tags WHERE sha256 = p.sha256 ORDER BY tag)) AS tags,
-    (SELECT group_concat(post, ', ') FROM (SELECT post FROM exports WHERE sha256 = p.sha256 ORDER BY post)) AS posts"""
+    (SELECT group_concat(post, ', ') FROM (SELECT post FROM exports WHERE sha256 = p.sha256 ORDER BY post)) AS posts,
+    (SELECT c.sha256 FROM live_clips c JOIN sources s ON s.path = c.photo_path
+        WHERE s.sha256 = p.sha256 LIMIT 1) AS live_clip"""
 
 
 def folder_key(library_path: str) -> str:

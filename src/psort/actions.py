@@ -2,7 +2,7 @@
 rearranges the library to match."""
 
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, time
 
 from .config import Config
 from .library import assign_names, curate, write_manifest
@@ -57,6 +57,27 @@ def set_date(cfg: Config, conn: sqlite3.Connection, sha: str, when: datetime) ->
     conn.commit()
     assign_names(conn)
     refresh(cfg, conn, recluster=True)
+
+
+def set_day(cfg: Config, conn: sqlite3.Connection, shas: list[str], day: date) -> int:
+    """Give several photos the same day (time unknown), e.g. a batch of PhotoPass downloads.
+    They leave the Undated list and go to that day's folder, but aren't grouped into bursts."""
+    if not shas:
+        raise ActionError("Tick at least one photo.")
+    for sha in shas:
+        _photo(conn, sha)
+    noon = datetime.combine(day, time(12, 0)).isoformat()
+    for sha in shas:
+        in_tray = conn.execute("SELECT 1 FROM tray WHERE sha256 = ?", (sha,)).fetchone()
+        conn.execute(
+            "UPDATE photos SET taken_at = ?, date_source = 'user-day', user_best = 0"
+            + ("" if in_tray else ", name = NULL") + " WHERE sha256 = ?",
+            (noon, sha),
+        )
+    conn.commit()
+    assign_names(conn)
+    refresh(cfg, conn, recluster=True)
+    return len(shas)
 
 
 def set_tags(cfg: Config, conn: sqlite3.Connection, sha: str, text: str) -> list[str]:

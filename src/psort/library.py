@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 from collections.abc import Callable
@@ -29,6 +30,8 @@ class CurateStats:
     missing: list[str] = field(default_factory=list)  # names with no library copy and no inbox source
     videos_copied: int = 0
     videos_moved: int = 0
+    clips_copied: int = 0
+    others_copied: int = 0
 
 
 def assign_names(conn: sqlite3.Connection) -> None:
@@ -156,7 +159,93 @@ def curate(
     v = videos_mod.curate(cfg, conn, dry_run=dry_run, log=log)
     stats.videos_copied, stats.videos_moved = v.copied, v.moved
     stats.missing += v.missing or []
+
+    # Live Photo clips follow their photo (same name, video extension), wherever it moves.
+    copied, _, missing = _sync(cfg, conn, cfg.library, "live_clips", _clip_paths(conn), dry_run, log, "Live Photo clip")
+    stats.clips_copied = copied
+    stats.missing += missing
+    # Everything else keeps its original inbox path under unsorted_files/.
+    copied, _, missing = _sync(cfg, conn, cfg.unsorted, "other_files", _other_paths(conn), dry_run, log, "file")
+    stats.others_copied = copied
+    stats.missing += missing
     return stats
+
+
+def _clip_paths(conn: sqlite3.Connection) -> dict[str, str]:
+    paths, used = {}, set()
+    rows = conn.execute(
+        """SELECT c.sha256, c.ext, p.library_path FROM live_clips c
+           JOIN sources s ON s.path = c.photo_path JOIN photos p ON p.sha256 = s.sha256
+           WHERE p.library_path IS NOT NULL ORDER BY c.sha256"""
+    ).fetchall()
+    for r in rows:
+        base = r["library_path"].rsplit(".", 1)[0]
+        target, n = f"{base}{r['ext'].lower()}", 1
+        while target in used:  # a second, different clip for the same photo (rare)
+            n += 1
+            target = f"{base}_live{n}{r['ext'].lower()}"
+        used.add(target)
+        paths[r["sha256"]] = target
+    return paths
+
+
+def _no_spaces(part: str) -> str:
+    """'2016-01-03 - Jacksonville Bank Marathon' → '2016-01-03-Jacksonville-Bank-Marathon'."""
+    return re.sub(r"-{2,}", "-", re.sub(r"\s*-\s*|\s+", "-", part.strip())) or "_"
+
+
+def _other_paths(conn: sqlite3.Connection) -> dict[str, str]:
+    paths, used = {}, set()
+    for r in conn.execute(
+        "SELECT o.sha256, (SELECT MIN(s.path) FROM sources s WHERE s.sha256 = o.sha256) AS path "
+        "FROM other_files o ORDER BY path"
+    ):
+        if r["path"] is None:
+            continue
+        target = "/".join(_no_spaces(p) for p in Path(r["path"]).parts)
+        stem, dot, ext = target.rpartition(".") if "." in Path(target).name else (target, "", "")
+        n = 1
+        while target in used:
+            n += 1
+            target = f"{stem}_{n}{dot}{ext}"
+        used.add(target)
+        paths[r["sha256"]] = target
+    return paths
+
+
+def _sync(cfg: Config, conn: sqlite3.Connection, root: Path, table: str, desired: dict[str, str],
+          dry_run: bool, log: Callable[[str], None], label: str) -> tuple[int, int, list[str]]:
+    """Copy (from the inbox) or move files so each sha256 in `table` sits at its desired path."""
+    copied = moved = 0
+    missing: list[str] = []
+    current = {r["sha256"]: r["library_path"] for r in conn.execute(f"SELECT sha256, library_path FROM {table}")}
+    for sha, target in sorted(desired.items(), key=lambda kv: kv[1]):
+        dest, cur = root / target, current.get(sha)
+        if cur == target and dest.exists():
+            continue
+        if dest.exists():
+            if sha256_file(dest) != sha:
+                raise FileExistsError(f"{dest} exists and is a different file; refusing to overwrite")
+        elif cur and (root / cur).exists():
+            log(f"  move {label} {cur} → {target}")
+            if not dry_run:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(root / cur, dest)
+                _remove_empty_parents(root / cur, root)
+            moved += 1
+        else:
+            src = _find_source(cfg, conn, sha)
+            if src is None:
+                missing.append(target)
+                continue
+            log(f"  copy {label} {src.relative_to(cfg.inbox)} → {target}")
+            if not dry_run:
+                _copy_verified(src, dest, sha)
+            copied += 1
+        if not dry_run:
+            conn.execute(f"UPDATE {table} SET library_path = ? WHERE sha256 = ?", (target, sha))
+            conn.commit()
+    return copied, moved, missing
 
 
 def _find_source(cfg: Config, conn: sqlite3.Connection, sha: str) -> Path | None:
@@ -174,9 +263,9 @@ class VerifyResult:
     message: str
 
 
-def verify(cfg: Config, conn: sqlite3.Connection, batch: str) -> list[VerifyResult]:
-    """Is every file in an inbox batch safe to delete? (DESIGN.md §5.5)"""
-    batch_dir = (cfg.inbox / batch).resolve()
+def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> list[VerifyResult]:
+    """Is every file in an inbox batch (or the whole inbox) safe to delete? (DESIGN.md §5.5)"""
+    batch_dir = (cfg.inbox / batch).resolve() if batch else cfg.inbox.resolve()
     if not batch_dir.is_dir() or not batch_dir.is_relative_to(cfg.inbox.resolve()):
         raise FileNotFoundError(f"No batch folder {batch!r} in {cfg.inbox}")
 
@@ -188,8 +277,14 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str) -> list[VerifyResu
             results.append(VerifyResult(str(rel), False, "not ingested yet (run `psort run`)"))
         elif src["size"] != st.st_size or src["mtime"] != st.st_mtime:
             results.append(VerifyResult(str(rel), False, "changed since it was ingested (run `psort run`)"))
-        elif src["status"] in ("sidecar", "livephoto"):
+        elif src["status"] == "junk":
             results.append(VerifyResult(str(rel), True, src["reason"]))
+        elif src["status"] == "livephoto":
+            results.append(_placed(conn, cfg.library, "live_clips", src["sha256"], "Live Photo clip beside its photo: ",
+                                   rel=str(rel)))
+        elif src["status"] in ("sidecar", "other", "error"):
+            results.append(_placed(conn, cfg.unsorted, "other_files", src["sha256"],
+                                   f"{src['reason']}; kept in unsorted_files/", rel=str(rel)))
         elif src["status"] == "video":
             video = conn.execute("SELECT library_path FROM videos WHERE sha256 = ?", (src["sha256"],)).fetchone()
             if video and video["library_path"] and (cfg.videos / video["library_path"]).exists():
@@ -205,6 +300,14 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str) -> list[VerifyResu
             else:
                 results.append(VerifyResult(str(rel), False, "not copied to the library yet (run `psort run`)"))
     return results
+
+
+def _placed(conn, root: Path, table: str, sha: str | None, ok_prefix: str, rel: str | None = None) -> "VerifyResult":
+    row = sha and conn.execute(f"SELECT library_path FROM {table} WHERE sha256 = ?", (sha,)).fetchone()
+    path = rel or ""
+    if row and row["library_path"] and (root / row["library_path"]).exists():
+        return VerifyResult(path, True, f"{ok_prefix}{row['library_path']}")
+    return VerifyResult(path, False, "not copied yet (run `psort run`)")
 
 
 def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
@@ -234,6 +337,8 @@ def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
                 "photos": photos,
                 "events": events,
                 "videos": [dict(r) for r in conn.execute("SELECT * FROM videos ORDER BY taken_at, name")],
+                "live_clips": [dict(r) for r in conn.execute("SELECT * FROM live_clips ORDER BY library_path")],
+                "other_files": [dict(r) for r in conn.execute("SELECT * FROM other_files ORDER BY library_path")],
                 "sources": sources,
             },
             indent=1,

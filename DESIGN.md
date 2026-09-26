@@ -10,7 +10,13 @@ psort is a local photo curation tool. It takes the chaotic, date-dumped folders 
 4. **No cost, no sudo.** Python 3.12 and pip-installable libraries only. Everything runs locally, with no cloud APIs.
 5. **Idempotent.** Re-running any command is safe. Photos are identified by their **content**, not their path, so moving or renaming inbox folders doesn't cause reprocessing, and your review decisions survive re-runs.
 6. **The blog stays unchanged in Phase 1.** The existing `blogupdate.html` → Cloudinary → GitHub Action → Turbify flow keeps working exactly as it does today (§8).
-7. **Videos are kept, not curated.** Videos are copied into a parallel `videos/` tree that uses the same folder names as the library (§5.8). They get no best-shot picking, faces or export. iPhone Live Photo clips are skipped, since their still photo is kept. Anything skipped is always *reported*, so nothing is silently lost before you delete an inbox batch.
+7. **Nothing from the inbox is lost.** Every file is copied somewhere:
+   - photos → the library
+   - iPhone Live Photo clips → beside their photo in the library, with the same name
+   - videos → the parallel `videos/` tree (§5.8)
+   - everything else, including helper files, documents and unreadable files → `unsorted_files/`, under its original folder path
+
+   The only files not copied are OS caches that Windows and macOS rebuild themselves (`Thumbs.db`, `desktop.ini`, `.DS_Store`). `psort verify` checks a batch, or the whole inbox, before you delete anything.
 8. **No spaces in names.** Every folder and file psort creates uses lowercase letters, digits, `-` and `_` only. Event names you type are converted: "Birthday Party" → `birthday-party`.
 
 ## 2. Folders
@@ -20,6 +26,7 @@ psort is a local photo curation tool. It takes the chaotic, date-dumped folders 
 | **Inbox** | `/mnt/d/psort-inbox/` (USB or Windows drive) | Never | Batches you drop in as subfolders, e.g. `2019-phone-dump/`, `sarah-iphone-2024/` |
 | **Library** | `/mnt/c/Users/steve/OneDrive/Pictures/psort-library/` | Yes | The curated master library (§5.4) |
 | **Videos** | `/mnt/c/Users/steve/OneDrive/photos/psort/videos/` (beside the library) | Yes | Videos, in the same year/day/event folders as the library (§5.8) |
+| **Unsorted files** | `…/psort/unsorted_files/` (beside the library) | Yes | Every non-photo, non-video file, under its original inbox path with spaces turned into hyphens |
 | **Outbox** | `/mnt/c/Users/steve/Pictures/psort-outbox/` | Yes | Web-ready exports for blog posts, one folder per post |
 | **State** | `~/.local/share/psort/` (inside WSL) | Yes | SQLite database and thumbnail/hash cache |
 
@@ -67,6 +74,8 @@ inbox ──ingest──► state DB ──cluster──► moments ──score�
        - Photos dated from a folder are never grouped into bursts or events, since they have no real time.
        - Photos ingested before this rule existed are re-dated automatically.
     4. the file's modified time, marked **date uncertain** so it shows up for review
+
+    On the Undated page you can set an exact date and time for one photo, or **one date for all ticked photos**. The second option files them in that day's folder with the time unknown, so they're never grouped into bursts.
   - **Other data:** camera model, width and height, orientation, screenshot flag (PNG, no camera EXIF, or screenshot-style name).
 - Records every skipped file (videos, unreadable files, unknown types), with its reason.
 
@@ -129,6 +138,8 @@ psort-library/
 
 ### 5.5 Verify (safe to delete)
 
+- `psort verify` with no batch name checks the **whole inbox**.
+
 - `psort verify <inbox-batch>` reports, for every file in a batch, either:
   - ✅ its content is in the library, or it's an exact duplicate of something in the library; or
   - ⚠️ it's **not** in the library: a skipped video, an unreadable file, and so on.
@@ -179,8 +190,11 @@ psort-library/
   3. the filename
   4. the folder name
   5. the file's modified time
-- **Live Photo clips:** a `.mov`/`.mp4` of 5 seconds or less, sitting beside a same-named HEIC or JPEG, is recorded as a Live Photo clip and not copied. `verify` treats it as safe to delete, because the photo is kept.
-- **Helper files:** `.THM` (camera video preview) and `.AAE` (iPhone edit settings) files are recorded as not needed, and `verify` treats them as safe to delete.
+- **Live Photo clips:** a `.mov`/`.mp4` of 5 seconds or less, sitting beside a same-named HEIC or JPEG, is a Live Photo clip.
+  - It's copied into the **library beside its photo, with the same name**, like `20260705_120000.heic` + `20260705_120000.mov`.
+  - It moves whenever the photo moves (best pick, events).
+  - The review UI marks the photo ◉ Live and can play the clip.
+- **Helper files:** `.THM` (camera video preview) and `.AAE` (iPhone edit settings) files are copied to `unsorted_files/` with everything else. A `.THM` also supplies the date for its video.
 - **Review UI:**
   - Each day or event page has a 🎬 section with a still frame, the video's length, and its Windows path.
   - MP4, MOV and WebM files play in the page.

@@ -26,8 +26,8 @@ def test_run_builds_library(psort, tmp_path, sample_inbox):
     out = psort("run").output
 
     assert "Ingest: 11 new, 1 exact duplicates" in out
-    assert "1 skipped" in out  # notes.txt (Thumbs.db is ignored, not skipped)
-    assert "1 Live Photo clip(s) skipped" in out  # IMG_0009.MOV beside IMG_0009.HEIC
+    assert "1 other files" in out  # notes.txt (Thumbs.db is an OS cache: recorded, not copied)
+    assert "1 Live Photo clip(s) kept beside their photos" in out  # IMG_0009.MOV beside IMG_0009.HEIC
     assert library_files(tmp_path / "library") == {
         # Burst: sharp IMG_0002 is best; the other two are its alternates.
         "2026/2026-07-03/20260703_145634.jpg",
@@ -42,6 +42,8 @@ def test_run_builds_library(psort, tmp_path, sample_inbox):
         "2026/2026-07-05/20260705_090000.jpg",
         "2026/2026-07-05/20260705_120000.heic",
         "_undated/20200102_030405.jpg",
+        # The Live Photo clip sits beside its photo, with the same name.
+        "2026/2026-07-05/20260705_120000.mov",
     }
     # The inbox is never touched.
     assert snapshot(sample_inbox) == before
@@ -66,7 +68,7 @@ def test_rerun_is_idempotent(psort, tmp_path):
     psort("run")
     lib_before = snapshot(tmp_path / "library")
     out = psort("run").output
-    assert "Ingest: 0 new, 0 exact duplicates, 14 unchanged" in out
+    assert "Ingest: 0 new, 0 exact duplicates, 15 unchanged" in out
     assert "Curate: 0 copied, 0 moved, 11 unchanged" in out
     assert {k: v for k, v in snapshot(tmp_path / "library").items() if ".psort" not in k} == {
         k: v for k, v in lib_before.items() if ".psort" not in k
@@ -106,11 +108,13 @@ def test_verify(psort, tmp_path, sample_inbox):
     out = psort("verify", "old-backup").output
     assert "safe to delete" in out
 
-    out = psort("verify", "2026-phone-dump", expect=2).output
-    assert "IMG_0009.MOV" not in out  # a Live Photo clip: fine to delete, its photo is kept
-    assert "notes.txt" in out
-    assert "1 of 13 files are NOT in the library" in out
-    assert "Live Photo clip" in psort("verify", "2026-phone-dump", "--all", expect=2).output
+    # Every file is copied somewhere now, so the whole batch is safe.
+    out = psort("verify", "2026-phone-dump", "--all").output
+    assert "All 14 files are copied" in out
+    assert "Live Photo clip beside its photo: 2026/2026-07-05/20260705_120000.mov" in out
+    assert "kept in unsorted_files/2026-phone-dump/notes.txt" in out
+    assert "Thumbs.db" in out and "OS cache file" in out
+    assert "The whole inbox is safe to delete" in psort("verify").output
 
     psort("verify", "../..", expect=1)
 

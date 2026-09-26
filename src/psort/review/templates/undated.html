@@ -4,19 +4,30 @@
 {% block content %}
 <h1>Undated photos</h1>
 <p class="muted">These had no date inside the file or in its name. Some got the month from their folder name
-  ("day unknown"); the rest are a guess from the file's modified time. Enter the real date (roughly is fine) and the
-  photo moves into its day folder.</p>
-{% if not photos %}<p>Nothing undated.</p>{% endif %}
+  ("day unknown"); the rest are a guess from the file's modified time.</p>
+{% if not photos %}<p>Nothing undated.</p>{% else %}
+  <form method="post" action="{{ url_for('set_day') }}" id="bulk" class="row bulk">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <strong>Tick photos below, then:</strong>
+    <input type="date" name="day" required>
+    <button class="ok">Set this date for all ticked</button>
+    <button type="button" onclick="document.querySelectorAll('input[name=photo]').forEach(c => c.checked = !c.checked)">Tick / untick all</button>
+  </form>
+  <p class="muted">Setting a date for several photos files them in that day's folder with the time unknown.
+    To give one photo an exact time, use the date and time box under it.</p>
+{% endif %}
 <div class="grid">
 {% for p in photos %}
   <div>
+    <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulk"> select</label>
     {{ card(p) }}
     <div class="muted">{{ "month from folder name" if p.date_source == "folder-month" else "guessed from file time" }}</div>
     <form method="post" action="{{ url_for('date', sha=p.sha256) }}" class="row">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="next" value="{{ request.path }}">
       <input type="datetime-local" name="when" value="{{ p.taken_at[:16] }}">
-      <button>Set date</button>
+      <button>Set date &amp; time</button>
     </form>
   </div>
 {% endfor %}

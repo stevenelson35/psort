@@ -30,6 +30,7 @@ class Config:
     outbox: Path
     state_dir: Path = DEFAULT_STATE_DIR
     videos_dir: Path | None = None  # default: a videos/ folder beside the library
+    unsorted_dir: Path | None = None  # default: an unsorted_files/ folder beside the library
     burst_gap_seconds: float = 10.0
     phash_threshold: int = 10
     close_call_margin: float = 0.05
@@ -43,6 +44,10 @@ class Config:
     @property
     def videos(self) -> Path:
         return self.videos_dir or self.library.parent / "videos"
+
+    @property
+    def unsorted(self) -> Path:
+        return self.unsorted_dir or self.library.parent / "unsorted_files"
 
     @property
     def db_path(self) -> Path:
@@ -80,6 +85,7 @@ def load(path: Path) -> Config:
             outbox=Path(paths["outbox"]).expanduser(),
             state_dir=Path(paths.get("state_dir", DEFAULT_STATE_DIR)).expanduser(),
             videos_dir=Path(paths["videos"]).expanduser() if "videos" in paths else None,
+            unsorted_dir=Path(paths["unsorted"]).expanduser() if "unsorted" in paths else None,
             burst_gap_seconds=float(cluster.get("burst_gap_seconds", 10.0)),
             phash_threshold=int(cluster.get("phash_threshold", 10)),
             close_call_margin=float(cluster.get("close_call_margin", 0.05)),
@@ -107,6 +113,8 @@ library = {q(library)}
 outbox = {q(outbox)}
 # Videos get the same year/day/event folders as the library, in their own tree.
 videos = {q(videos or library.parent / "videos")}
+# Every other file from the inbox (helper files, documents, unreadable files), under its original path.
+unsorted = {q(library.parent / "unsorted_files")}
 state_dir = {q(state_dir)}
 
 [cluster]

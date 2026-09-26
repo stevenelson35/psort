@@ -72,3 +72,6 @@ nav.top .theme { margin-left: auto; padding: .15rem .55rem; }
 .card.video video, .card.video img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--photo-bg); }
 .card .path { font-size: .75rem; word-break: break-all; }
 .grid.videos { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.bulk { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .6rem; position: sticky; top: 3rem; z-index: 1; }
+.tick { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .2rem; cursor: pointer; }
+details.live video { width: 100%; max-height: 360px; background: var(--photo-bg); margin-top: .3rem; }

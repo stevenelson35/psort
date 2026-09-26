@@ -21,8 +21,8 @@ SIDECAR_EXTS = {
     ".thm": "camera preview image for a video (not needed)",
     ".aae": "iPhone edit settings (not needed)",
 }
-# OS clutter that's neither a photo nor worth reporting.
-IGNORED_NAMES = {"thumbs.db", "desktop.ini", ".ds_store"}
+# Caches the OS rebuilds by itself: recorded, never copied.
+JUNK_NAMES = {"thumbs.db", "ehthumbs.db", "desktop.ini", ".ds_store"}
 
 ANALYSIS_SIZE = 1024  # long edge, pixels
 
@@ -35,8 +35,8 @@ _TAG_DATETIME_ORIGINAL = 36867
 _TAG_OFFSET_TIME_ORIGINAL = 36881
 
 
-def is_ignored(path: Path) -> bool:
-    return path.name.startswith(".") or path.name.lower() in IGNORED_NAMES
+def is_junk(path: Path) -> bool:
+    return path.name.lower() in JUNK_NAMES
 
 
 def normalize_ext(ext: str) -> str:

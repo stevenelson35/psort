@@ -9,8 +9,9 @@ from pathlib import PurePath
 #   folder                → the day, from a folder name like "2016-01-03 - Marathon" (time unknown)
 #   folder-month          → only the month, from "2016-04 - PhotoPass" (day and time unknown)
 #   mtime                 → the file's modified time: a guess
+#   user-day              → a day you set for several photos at once (time unknown)
 UNCERTAIN = ("mtime", "folder-month")  # listed on the Undated page for you to fix
-NO_TIME = ("mtime", "folder", "folder-month")  # no real time: never grouped into bursts or events
+NO_TIME = ("mtime", "folder", "folder-month", "user-day")  # no real time: never grouped into bursts or events
 
 
 def sql_in(values: tuple[str, ...]) -> str:

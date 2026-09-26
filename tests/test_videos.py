@@ -36,14 +36,16 @@ def test_videos_go_to_parallel_tree(psort, tmp_path, sample_inbox):
 
     out = psort("run").output
     assert "2 exact duplicates" in out  # the sample's photo copy + VID_copy.mp4
-    assert "Videos: 3 new" in out and "1 camera preview/helper file(s) not needed" in out
+    assert "Videos: 3 new" in out and "2 other files" in out  # the .THM and the sample's notes.txt
     videos = video_files(tmp_path / "videos")  # beside the library by default
     assert "2026/2026-07-03/20260703_150000.mp4" in videos
     assert "2015/2015-05_unknown-day/20150501_120000.mpg" in videos  # month from the folder name
     assert len(videos) == 3  # the exact copy wasn't duplicated
 
     out = psort("verify", "2015-05-fargo", "--all").output
-    assert "safe to delete" in out and "video: 2015/2015-05_unknown-day" in out and "camera preview" in out
+    assert "safe to delete" in out and "video: 2015/2015-05_unknown-day" in out
+    assert "camera preview" in out and "kept in unsorted_files/2015-05-fargo/MOV05714.THM" in out
+    assert (tmp_path / "unsorted_files/2015-05-fargo/MOV05714.THM").read_bytes() == b"camera thumbnail"
     assert "Videos:            3" in psort("status").output
 
     # Idempotent.
@@ -60,16 +62,21 @@ def test_event_names_apply_to_video_folders(psort, tmp_path, sample_inbox):
     assert (tmp_path / "library/2026/2026-07-03_birthday-party").is_dir()  # same folder name in both trees
 
 
-def test_live_photo_clips_are_skipped_but_long_videos_kept(psort, tmp_path, sample_inbox):
+def test_live_photo_clips_kept_beside_photos_and_long_videos_kept(psort, tmp_path, sample_inbox):
     live = sample_inbox / "iphone"
     save(live / "IMG_5000.HEIC", scene(95), "2026:07:07 10:00:00", model="iPhone 15", make="Apple", fmt="HEIF")
     make_video(live / "IMG_5000.MOV", seconds=2)
     save(live / "IMG_5001.HEIC", scene(96), "2026:07:07 11:00:00", model="iPhone 15", make="Apple", fmt="HEIF")
     make_video(live / "IMG_5001.MOV", seconds=8, shade=100)  # too long for a Live Photo: a real video
     out = psort("run").output
-    assert "1 new, 2 Live Photo clip(s) skipped" in out  # plus the sample's fake IMG_0009.MOV
+    assert "Videos: 1 new, 2 Live Photo clip(s) kept beside their photos" in out  # + the sample's IMG_0009.MOV
     conn = sqlite3.connect(tmp_path / "state/psort.db")
     assert conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 1
+    library = tmp_path / "library/2026/2026-07-07"
+    assert sorted(p.name for p in library.iterdir()) == ["20260707_100000.heic", "20260707_100000.mov",
+                                                         "20260707_110000.heic"]
+    vids = video_files(tmp_path / "videos")  # the 8-second one is a real video (no date inside, so undated)
+    assert len(vids) == 1 and next(iter(vids)).endswith(".mov")
     assert "safe to delete" in psort("verify", "iphone").output
 
 

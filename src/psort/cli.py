@@ -178,11 +178,14 @@ def status() -> None:
         "Exact duplicates": "SELECT COUNT(*) - COUNT(DISTINCT sha256) FROM sources WHERE status = 'image'",
         "Undated": f"SELECT COUNT(*) FROM photos WHERE date_source IN {sql_in(UNCERTAIN)}",
         "Screenshots": "SELECT COUNT(*) FROM photos WHERE is_screenshot = 1",
-        "Not in library": "SELECT COUNT(*) FROM photos WHERE library_path IS NULL",
         "Videos": "SELECT COUNT(*) FROM videos",
-        "Live Photo clips": "SELECT COUNT(*) FROM sources WHERE status = 'livephoto'",
-        "Skipped files": "SELECT COUNT(*) FROM sources WHERE status = 'skipped'",
+        "Live Photo clips": "SELECT COUNT(*) FROM live_clips",
+        "Other files": "SELECT COUNT(*) FROM other_files",
         "Unreadable": "SELECT COUNT(*) FROM sources WHERE status = 'error'",
+        "Not copied yet": """SELECT (SELECT COUNT(*) FROM photos WHERE library_path IS NULL)
+            + (SELECT COUNT(*) FROM videos WHERE library_path IS NULL)
+            + (SELECT COUNT(*) FROM live_clips WHERE library_path IS NULL)
+            + (SELECT COUNT(*) FROM other_files WHERE library_path IS NULL)""",
     }
     for label, sql in counts.items():
         typer.echo(f"{label + ':':19}{conn.execute(sql).fetchone()[0]}")
@@ -318,10 +321,10 @@ def faces_unlabel(face: Annotated[list[int], typer.Option(help="Face id. Repeata
 
 @app.command("verify")
 def verify_cmd(
-    batch: Annotated[str, typer.Argument(help="Batch folder name inside the inbox.")],
+    batch: Annotated[str | None, typer.Argument(help="Batch folder in the inbox (default: the whole inbox).")] = None,
     show_ok: Annotated[bool, typer.Option("--all", help="List safe files too.")] = False,
 ) -> None:
-    """Report whether an inbox batch is safe to delete."""
+    """Report whether an inbox batch (or the whole inbox) is safe to delete."""
     cfg, conn = _open()
     try:
         results = verify(cfg, conn, batch)
@@ -332,9 +335,10 @@ def verify_cmd(
     for r in results if show_ok else problems:
         typer.echo(f"{'✅' if r.ok else '⚠️ '} {r.path}  —  {r.message}")
     if problems:
-        typer.secho(f"{len(problems)} of {len(results)} files are NOT in the library. Don't delete yet.", fg="yellow")
+        typer.secho(f"{len(problems)} of {len(results)} files are NOT copied anywhere yet. Don't delete.", fg="yellow")
         raise typer.Exit(2)
-    typer.secho(f"All {len(results)} files are in the library. {batch!r} is safe to delete.", fg="green")
+    what = repr(batch) if batch else "The whole inbox"
+    typer.secho(f"All {len(results)} files are copied (or are OS cache files). {what} is safe to delete.", fg="green")
 
 
 def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
@@ -345,13 +349,12 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
         raise typer.Exit(1) from e
     typer.echo(
         f"Ingest: {s.new_photos} new, {s.duplicates} exact duplicates, {s.unchanged} unchanged, "
-        f"{s.skipped} skipped, {s.errors} unreadable"
+        f"{s.others} other files, {s.errors} unreadable"
     )
     if s.redated:
         typer.echo(f"Dated {s.redated} earlier undated photo(s) from their folder names")
-    if s.new_videos or s.live_clips or s.sidecars:
-        typer.echo(f"Videos: {s.new_videos} new, {s.live_clips} Live Photo clip(s) skipped, "
-                   f"{s.sidecars} camera preview/helper file(s) not needed")
+    if s.new_videos or s.live_clips:
+        typer.echo(f"Videos: {s.new_videos} new, {s.live_clips} Live Photo clip(s) kept beside their photos")
 
 
 def _cluster(cfg: Config, conn: sqlite3.Connection) -> None:
@@ -376,6 +379,10 @@ def _curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool) -> None:
     typer.echo(f"{prefix}: {s.copied} copied, {s.moved} moved, {s.unchanged} unchanged")
     if s.videos_copied or s.videos_moved:
         typer.echo(f"{prefix} videos: {s.videos_copied} copied, {s.videos_moved} moved → {cfg.videos}")
+    if s.clips_copied:
+        typer.echo(f"{prefix} Live Photo clips: {s.clips_copied} copied beside their photos")
+    if s.others_copied:
+        typer.echo(f"{prefix} other files: {s.others_copied} copied → {cfg.unsorted}")
     if s.missing:
         typer.secho(
             f"{len(s.missing)} photos have no library copy and their inbox files are gone: "
