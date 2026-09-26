@@ -68,11 +68,13 @@ inbox ─[1 scan]─► state DB ─[2 group moments]─► ─[3 score]─► �
 ```
 
 ### 4.1 Progress
-- **In a terminal,** a single line updates in place:
+- **In a terminal,** a single line updates in place, with a spinner:
   ```
-  [1/6] Scanning inbox  3,412 / 7,512 files  45%  ·  overall 23% · 4m12s elapsed, about 11m left
+  ⠹ [1/6] Scanning inbox  3,412 / 7,512 files  45%  ·  overall 23% · 4m12s elapsed, about 11m left
   ```
-  When output is redirected, it prints a line every 10% instead.
+- **Something always shows.** The first line appears immediately ("looking at the inbox…", with a running file count). The spinner is driven by its own timer, so it keeps turning even while psort waits on a slow disk or a big file: a heartbeat that shows it's alive.
+- **When output is redirected,** it prints a line every 10%, plus "… still working on <step> (elapsed)" after 30 seconds of silence.
+- Listing the inbox checks each file once, and the scan reuses those results. On the user's inbox (~9,700 files on `/mnt/c`), listing alone takes about 75 s.
 - **The overall percentage and time left** are weighted by this run's actual work, estimated up front: new files, photos needing a face scan, and so on. The faces step is re-estimated once its exact count is known.
 - **Speed:** about 0.5 s per new photo (analysis plus faces). A 5,000-photo batch takes roughly 40 minutes. Ctrl+C is safe, and the next run resumes.
 

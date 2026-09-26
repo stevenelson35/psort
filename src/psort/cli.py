@@ -134,45 +134,53 @@ def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; sho
     if not cfg.inbox.is_dir():
         typer.secho(f"Inbox not found: {cfg.inbox}", fg="red", err=True)
         raise typer.Exit(1)
-    files, pending = ingest_mod.plan(cfg, conn)
+    # One progress display for the whole run, showing from the very first moment: just looking at a
+    # big inbox on a Windows drive takes a minute or more. Step sizes are filled in once known.
+    names = ["Scanning inbox", "Grouping moments", "Scoring", "Arranging library"]
+    if not dry_run:
+        names += ["Finding faces", "Updating highlights"]
+    p = Progress([Stage(n, 1) for n in names])
+    p.start(0, "looking at the inbox…")
+    try:
+        files, pending = ingest_mod.plan(cfg, conn, note=p.note)
+    except BaseException:
+        p.close()
+        raise
     photos = conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0] + pending
     faces_on = cfg.recognition_model.exists() and cfg.face_model.exists()
     unscanned = conn.execute("SELECT COUNT(*) FROM photos WHERE faces_scanned = 0").fetchone()[0] + pending
     # Rough seconds per step, so "overall" and "time left" reflect this run's actual work.
-    stages = [
-        Stage("Scanning inbox", 1 + 0.02 * len(files) + 0.5 * pending),
-        Stage("Grouping moments", 1 + 0.0005 * photos),
-        Stage("Scoring", 0.5 + 0.0003 * photos),
-        Stage("Arranging library", 2 + 0.2 * pending),
-    ]
-    if not dry_run:
-        stages += [Stage("Finding faces", 0.5 + (0.3 * unscanned if faces_on else 0)), Stage("Updating highlights", 1)]
-    p = Progress(stages)
-
-    p.start(0, f"{len(files):,} files, {pending:,} new or changed")
-    _ingest(cfg, conn, p, files)
-    p.finish(0)
-    p.start(1)
-    _cluster(cfg, conn, p)
-    p.finish(1)
-    p.start(2)
-    score(cfg, conn)
-    close = conn.execute("SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1").fetchone()[0]
-    p.finish(2, f"{close:,} close call(s)")
-    p.start(3)
-    _curate(cfg, conn, dry_run, p)
-    p.finish(3)
-    if not dry_run:
-        todo = conn.execute("SELECT COUNT(*) FROM photos WHERE faces_scanned = 0 AND library_path IS NOT NULL"
-                            ).fetchone()[0]
-        p.set_weight(4, 0.5 + (0.3 * todo if faces_on else 0))  # now we know exactly
-        p.start(4, f"{todo:,} photos to scan" if faces_on else "")
-        _faces(cfg, conn, p)
-        p.finish(4)
-        p.start(5)
-        _highlights(cfg, conn, p)
-        p.finish(5)
-    p.done()
+    estimates = [1 + 0.02 * len(files) + 0.5 * pending, 1 + 0.0005 * photos, 0.5 + 0.0003 * photos,
+                 2 + 0.2 * pending, 0.5 + (0.3 * unscanned if faces_on else 0), 1]
+    for i in range(len(names)):
+        p.set_weight(i, estimates[i])
+    try:
+        p.start(0, f"{len(files):,} files, {pending:,} new or changed")
+        _ingest(cfg, conn, p, files)
+        p.finish(0)
+        p.start(1)
+        _cluster(cfg, conn, p)
+        p.finish(1)
+        p.start(2)
+        score(cfg, conn)
+        close = conn.execute("SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1").fetchone()[0]
+        p.finish(2, f"{close:,} close call(s)")
+        p.start(3)
+        _curate(cfg, conn, dry_run, p)
+        p.finish(3)
+        if not dry_run:
+            todo = conn.execute("SELECT COUNT(*) FROM photos WHERE faces_scanned = 0 AND library_path IS NOT NULL"
+                                ).fetchone()[0]
+            p.set_weight(4, 0.5 + (0.3 * todo if faces_on else 0))  # now we know exactly
+            p.start(4, f"{todo:,} photos to scan" if faces_on else "")
+            _faces(cfg, conn, p)
+            p.finish(4)
+            p.start(5)
+            _highlights(cfg, conn, p)
+            p.finish(5)
+        p.done()
+    finally:
+        p.close()  # stop the spinner even if the run is interrupted
 
 
 @app.command()

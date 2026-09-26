@@ -1,5 +1,6 @@
 """Stage 1: scan the inbox (read-only) and record every file (DESIGN.md §5.1)."""
 
+import os
 import sqlite3
 import time
 from collections.abc import Callable
@@ -155,17 +156,26 @@ def _unchanged(known, st, path: Path) -> bool:
     )
 
 
-def plan(cfg: Config, conn: sqlite3.Connection) -> tuple[list[tuple[Path, Path]], int]:
-    """(every inbox file, how many need processing), for progress estimates."""
-    files = list(inbox_files(cfg.inbox))
+def plan(cfg: Config, conn: sqlite3.Connection,
+         note: Callable[[str], None] | None = None) -> tuple[list[tuple[Path, Path, os.stat_result]], int]:
+    """(every inbox file with its stat, how many need processing). Looking at thousands of files on
+    a Windows drive takes a minute or more, so this reports as it goes, and ingest reuses the stats
+    instead of checking every file twice."""
     known = {r["path"]: r for r in conn.execute("SELECT path, size, mtime, status, sha256 FROM sources")}
-    pending = sum(1 for path, rel in files if not _unchanged(known.get(str(rel)), path.stat(), path))
+    files, pending = [], 0
+    for path, rel in inbox_files(cfg.inbox):
+        st = path.stat()
+        files.append((path, rel, st))
+        if not _unchanged(known.get(str(rel)), st, path):
+            pending += 1
+        if note and len(files) % 250 == 0:
+            note(f"looking at the inbox: {len(files):,} files so far, {pending:,} new or changed")
     return files, pending
 
 
 def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = print,
            progress: Callable[[int, int], None] | None = None,
-           files: list[tuple[Path, Path]] | None = None) -> IngestStats:
+           files: list[tuple] | None = None) -> IngestStats:
     """Record every inbox file. Every file except OS caches ends up copied somewhere: photos to
     the library, videos to videos/, Live Photo clips beside their photo, the rest to unsorted_files/."""
     if not cfg.inbox.is_dir():
@@ -175,10 +185,11 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
     siblings: dict[Path, dict[str, str]] = {}  # folder → {lowercase name: real name}, for Live Photo pairing
 
     files = files if files is not None else list(inbox_files(cfg.inbox))
-    for n, (path, rel) in enumerate(files, start=1):
+    for n, item in enumerate(files, start=1):
         if progress:
             progress(n - 1, len(files))
-        st = path.stat()
+        path, rel = item[0], item[1]
+        st = item[2] if len(item) > 2 else path.stat()  # plan() already looked at it
         known = conn.execute("SELECT size, mtime, status, sha256 FROM sources WHERE path = ?", (str(rel),)).fetchone()
         # Unchanged files are skipped, except ones recorded without a copy by an earlier version.
         if _unchanged(known, st, path):
