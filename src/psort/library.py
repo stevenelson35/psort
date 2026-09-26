@@ -164,10 +164,16 @@ def curate(
     copied, _, missing = _sync(cfg, conn, cfg.library, "live_clips", _clip_paths(conn), dry_run, log, "Live Photo clip")
     stats.clips_copied = copied
     stats.missing += missing
+    # Rich Capture packages sit beside their finished photo (same name, .nar).
+    copied, _, missing = _sync(cfg, conn, cfg.library, "rich_packages", _rich_paths(conn), dry_run, log,
+                               "Rich Capture package")
+    stats.clips_copied += copied
+    stats.missing += missing
     # Everything else keeps its original inbox path under unsorted_files/.
     copied, _, missing = _sync(cfg, conn, cfg.unsorted, "other_files", _other_paths(conn), dry_run, log, "file")
     stats.others_copied = copied
     stats.missing += missing
+    shutil.rmtree(cfg.state_dir / "tmp", ignore_errors=True)  # extracted frames, once copied
     return stats
 
 
@@ -186,6 +192,18 @@ def _clip_paths(conn: sqlite3.Connection) -> dict[str, str]:
             target = f"{base}_live{n}{r['ext'].lower()}"
         used.add(target)
         paths[r["sha256"]] = target
+    return paths
+
+
+def _rich_paths(conn: sqlite3.Connection) -> dict[str, str]:
+    from .rich import package_photo_sha
+
+    paths = {}
+    for r in conn.execute("SELECT sha256 FROM rich_packages ORDER BY sha256").fetchall():
+        photo = package_photo_sha(conn, r["sha256"])
+        row = photo and conn.execute("SELECT library_path FROM photos WHERE sha256 = ?", (photo,)).fetchone()
+        if row and row["library_path"]:
+            paths[r["sha256"]] = row["library_path"].rsplit(".", 1)[0] + ".nar"
     return paths
 
 
@@ -253,7 +271,10 @@ def _find_source(cfg: Config, conn: sqlite3.Connection, sha: str) -> Path | None
         path = cfg.inbox / r["path"]
         if path.exists():
             return path
-    return None
+    # A frame unpacked from a Rich Capture package: extract it again from the package.
+    from .rich import extract_frame
+
+    return extract_frame(cfg, conn, sha)
 
 
 @dataclass
@@ -279,6 +300,9 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> l
             results.append(VerifyResult(str(rel), False, "changed since it was ingested (run `psort run`)"))
         elif src["status"] == "junk":
             results.append(VerifyResult(str(rel), True, src["reason"]))
+        elif src["status"] == "rich":
+            results.append(_placed(conn, cfg.library, "rich_packages", src["sha256"],
+                                   "Rich Capture package beside its photo: ", rel=str(rel)))
         elif src["status"] == "livephoto" and _photo_deleted(conn, str(rel)):
             results.append(VerifyResult(str(rel), True, "Live Photo clip of a photo you deleted"))
         elif src["status"] == "livephoto":
@@ -319,6 +343,10 @@ def _placed(conn, root: Path, table: str, sha: str | None, ok_prefix: str, rel: 
     path = rel or ""
     if row and row["library_path"] and (root / row["library_path"]).exists():
         return VerifyResult(path, True, f"{ok_prefix}{row['library_path']}")
+    if table == "rich_packages" and sha and conn.execute(
+            """SELECT 1 FROM rich_packages r JOIN sources s ON s.path = r.photo_path
+               JOIN deleted_photos d ON d.sha256 = s.sha256 WHERE r.sha256 = ?""", (sha,)).fetchone():
+        return VerifyResult(path, True, "Rich Capture package of a photo you deleted")
     return VerifyResult(path, False, "not copied yet (run `psort run`)")
 
 
@@ -352,6 +380,8 @@ def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
                 "events": events,
                 "videos": [dict(r) for r in conn.execute("SELECT * FROM videos ORDER BY taken_at, name")],
                 "live_clips": [dict(r) for r in conn.execute("SELECT * FROM live_clips ORDER BY library_path")],
+                "rich_packages": [dict(r) for r in conn.execute("SELECT * FROM rich_packages ORDER BY library_path")],
+                "derived_frames": [dict(r) for r in conn.execute("SELECT * FROM derived_frames")],
                 "other_files": [dict(r) for r in conn.execute("SELECT * FROM other_files ORDER BY library_path")],
                 "deleted_photos": [{k: r[k] for k in ("sha256", "name", "taken_at", "trash_path", "purged", "deleted_at")}
                                    for r in conn.execute("SELECT * FROM deleted_photos ORDER BY deleted_at")],

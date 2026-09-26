@@ -16,6 +16,8 @@ cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)  # hide backend
 IMAGE_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".png"}
 VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".avi", ".3gp", ".mkv", ".mts", ".m2ts", ".wmv", ".mpg", ".mpeg",
               ".mod", ".tod", ".vob", ".webm", ".flv", ".dv"}
+# Nokia Lumia Rich Capture packages: a ZIP of the frames behind a _Rich.jpg.
+RICH_EXTS = {".nar"}
 # Files that only describe another file and are safe to leave behind.
 SIDECAR_EXTS = {
     ".thm": "camera preview image for a video (not needed)",

@@ -186,6 +186,8 @@ def status() -> None:
         "Screenshots": "SELECT COUNT(*) FROM photos WHERE is_screenshot = 1",
         "Videos": "SELECT COUNT(*) FROM videos",
         "Live Photo clips": "SELECT COUNT(*) FROM live_clips",
+        "Rich Capture": "SELECT COUNT(*) FROM rich_packages",
+        "Rich frames": "SELECT COUNT(*) FROM derived_frames d JOIN photos p ON p.sha256 = d.sha256",
         "Other files": "SELECT COUNT(*) FROM other_files",
         "Unreadable": "SELECT COUNT(*) FROM sources WHERE status = 'error'",
         "Not copied yet": """SELECT (SELECT COUNT(*) FROM photos WHERE library_path IS NULL)
@@ -452,6 +454,8 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
         typer.echo(f"{s.replaced} file(s) changed since last seen (e.g. a copy finished): old copies cleaned up.")
     if s.redated:
         typer.echo(f"Dated {s.redated} earlier undated photo(s) from their folder names")
+    if s.rich_packages:
+        typer.echo(f"Rich Capture: {s.rich_packages} package(s), {s.rich_frames} frame(s) added as photos")
     if s.new_videos or s.live_clips:
         typer.echo(f"Videos: {s.new_videos} new, {s.live_clips} Live Photo clip(s) kept beside their photos")
 

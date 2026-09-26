@@ -52,6 +52,22 @@ CREATE TABLE IF NOT EXISTS live_clips (
     library_path TEXT                      -- relative to the library root
 );
 
+-- Nokia Lumia "Rich Capture" packages (.nar: a ZIP of the frames behind a _Rich.jpg). The package
+-- is kept beside its finished photo in the library; its frames become photos (alternates) too.
+CREATE TABLE IF NOT EXISTS rich_packages (
+    sha256       TEXT PRIMARY KEY,
+    photo_path   TEXT,                     -- inbox-relative path of the finished photo (NULL if missing)
+    library_path TEXT                      -- relative to the library root
+);
+
+-- Photos that came out of a Rich Capture package rather than straight from the inbox.
+CREATE TABLE IF NOT EXISTS derived_frames (
+    sha256       TEXT PRIMARY KEY,         -- the frame's photo
+    package_sha  TEXT NOT NULL,
+    member       TEXT NOT NULL,            -- file name inside the package, e.g. Reference.jpg
+    label        TEXT                      -- what the camera called it: flash, no flash, ...
+);
+
 -- Everything that isn't a photo or video (helper files, documents, unreadable files), copied
 -- to unsorted_files/ under its original folder path so nothing from the inbox is ever lost.
 CREATE TABLE IF NOT EXISTS other_files (
@@ -65,7 +81,7 @@ CREATE TABLE IF NOT EXISTS sources (
     batch   TEXT NOT NULL,
     size    INTEGER NOT NULL,
     mtime   REAL NOT NULL,
-    status  TEXT NOT NULL,                 -- image | video | livephoto | sidecar | other | error | junk
+    status  TEXT NOT NULL,                 -- image | video | livephoto | rich | sidecar | other | error | junk
     reason  TEXT,
     sha256  TEXT REFERENCES photos(sha256)
 );

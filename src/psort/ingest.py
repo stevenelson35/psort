@@ -11,9 +11,11 @@ from PIL import Image
 
 from . import dates
 from .config import Config
+from . import rich
 from . import videos as videos_mod
 from .imaging import (
     IMAGE_EXTS,
+    RICH_EXTS,
     SIDECAR_EXTS,
     VIDEO_EXTS,
     FaceDetector,
@@ -39,6 +41,8 @@ class IngestStats:
     arriving: int = 0  # still being copied in: left for the next run
     replaced: int = 0  # changed since last seen (e.g. a partial copy finished): old copies cleaned up
     recovered: int = 0  # unreadable before, read fine now
+    rich_packages: int = 0  # Nokia Rich Capture .nar packages
+    rich_frames: int = 0  # photos unpacked from them
 
 
 def batch_of(rel: Path) -> str:
@@ -134,6 +138,8 @@ def kind_of(path: Path) -> str:
         return "image"
     if ext in VIDEO_EXTS:
         return "video"
+    if ext in RICH_EXTS:
+        return "rich"
     if ext in SIDECAR_EXTS:
         return "sidecar"
     return "other"
@@ -154,7 +160,8 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
         # Unchanged files are skipped, except ones recorded without a copy by an earlier version.
         if (known and known["size"] == st.st_size and known["mtime"] == st.st_mtime
                 and (known["sha256"] is not None or known["status"] == "junk")
-                and known["status"] != "error"):  # unreadable last time: try again (psort may have improved)
+                and known["status"] != "error"  # unreadable last time: try again (psort may have improved)
+                and not (known["status"] == "other" and kind_of(path) == "rich")):  # handled as a package now
             stats.unchanged += 1
             continue
 
@@ -177,6 +184,10 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
                 if path.parent not in siblings:
                     siblings[path.parent] = {p.name.lower(): p.name for p in path.parent.iterdir()}
                 _ingest_video(conn, path, rel, st, ext, siblings[path.parent], stats)
+            elif kind == "rich" and rich.is_package(path):
+                if path.parent not in siblings:
+                    siblings[path.parent] = {p.name.lower(): p.name for p in path.parent.iterdir()}
+                _ingest_rich(cfg, conn, path, rel, st, siblings[path.parent], detector, stats)
             elif kind == "sidecar":
                 _ingest_other(conn, path, rel, st, "sidecar", SIDECAR_EXTS[ext])
                 stats.others += 1
@@ -203,6 +214,8 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
         if known and known["status"] == "error" and new and new["status"] != "error":
             stats.recovered += 1
             _drop_unsorted_copy(cfg, conn, new["sha256"])
+        elif known and known["status"] == "other" and new and new["status"] == "rich":
+            _drop_unsorted_copy(cfg, conn, new["sha256"])  # was filed as "other" before packages were understood
 
         if n % 100 == 0:
             conn.commit()
@@ -230,8 +243,15 @@ def forget_content(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
     if conn.execute("SELECT 1 FROM sources WHERE sha256 = ?", (sha,)).fetchone():
         return False  # still in the inbox somewhere
     removed = False
+    # Frames unpacked from a package that's gone go with it.
+    for f in conn.execute("SELECT sha256 FROM derived_frames WHERE package_sha = ?", (sha,)).fetchall():
+        other = conn.execute("""SELECT 1 FROM derived_frames d JOIN sources s ON s.sha256 = d.package_sha
+                                WHERE d.sha256 = ? AND d.package_sha != ?""", (f["sha256"], sha)).fetchone()
+        if not other:
+            forget_content(cfg, conn, f["sha256"])
+            conn.execute("DELETE FROM derived_frames WHERE sha256 = ?", (f["sha256"],))
     for table, root in (("photos", cfg.library), ("videos", cfg.videos), ("other_files", cfg.unsorted),
-                        ("live_clips", cfg.library)):
+                        ("live_clips", cfg.library), ("rich_packages", cfg.library)):
         row = conn.execute(f"SELECT library_path FROM {table} WHERE sha256 = ?", (sha,)).fetchone()
         if row is None:
             continue
@@ -315,6 +335,40 @@ def _ingest_video(conn, path, rel, st, ext, sibling_names: dict[str, str], stats
         )
         stats.new_videos += 1
     _record_source(conn, rel, st, "video", sha=sha)
+
+
+def _ingest_rich(cfg, conn, path, rel, st, sibling_names: dict[str, str], detector, stats) -> None:
+    """A Rich Capture package: kept beside its finished photo; each frame becomes a photo too."""
+    sha = sha256_file(path)
+    _steady(path, st)
+    photo_name = next((sibling_names[f"{path.stem.lower()}{e}"] for e in (".jpg", ".jpeg")
+                       if f"{path.stem.lower()}{e}" in sibling_names), None)
+    conn.execute("INSERT OR IGNORE INTO rich_packages (sha256, photo_path) VALUES (?, ?)",
+                 (sha, str(rel.parent / photo_name) if photo_name else None))
+    for member, label, data in rich.frames(path):
+        frame_sha = rich.sha256_bytes(data)
+        conn.execute("INSERT OR IGNORE INTO derived_frames (sha256, package_sha, member, label) VALUES (?,?,?,?)",
+                     (frame_sha, sha, member, label))
+        if conn.execute("SELECT 1 FROM photos WHERE sha256 = ? UNION SELECT 1 FROM deleted_photos WHERE sha256 = ?",
+                        (frame_sha, frame_sha)).fetchone():
+            continue
+        tmp = rich.with_frame_file(data, cfg, f"analyze-{frame_sha}.jpg")
+        try:
+            a = analyze(tmp, detector)
+        finally:
+            tmp.unlink(missing_ok=True)
+        # Frames carry their own EXIF date; failing that, the package's name/folder/file time.
+        taken, source = _taken_at(path, rel, a.exif_datetime, st.st_mtime)
+        conn.execute(
+            """INSERT INTO photos (sha256, ext, taken_at, tz_offset, date_source, camera, width, height,
+                   is_screenshot, phash, sharpness, exposure, faces, face_sharpness)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (frame_sha, ".jpg", taken.isoformat(), a.exif_offset, source, a.camera, a.width, a.height, 0,
+             a.phash, a.sharpness, a.exposure, a.faces, a.face_sharpness),
+        )
+        stats.rich_frames += 1
+    _record_source(conn, rel, st, "rich", "Rich Capture package (kept beside its photo; frames added)", sha)
+    stats.rich_packages += 1
 
 
 def _ingest_other(conn, path, rel, st, status: str, reason: str) -> None:

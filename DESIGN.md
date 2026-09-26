@@ -243,6 +243,16 @@ psort-library/
 
 To change *where* something lives, use psort: best pick, events or dates. Its layout always follows those.
 
+### 5.12 Nokia Lumia Rich Capture (.nar)
+
+- **What they are:** a Lumia saved `WP_…_Rich.jpg`, the finished photo, plus `WP_…_Rich.nar`: a ZIP holding the frames it was blended from (`Extra1.jpg` = no flash, `Reference.jpg` = flash, `FnF.jpg` = flash + no-flash blend) and two small XML files.
+- **The package:** each `.nar` is kept **beside its finished photo** in the library, with the same name and a `.nar` extension. It moves with that photo. If there's no finished photo, it sits beside the flash frame.
+- **The frames:** each one is unpacked and added as a **photo of its own**, using the frame's own EXIF date and camera. So it competes in the same moment as the finished photo: the best shot wins, and the others become alternates, or duplicates if they're effectively the same picture.
+  - Frames are copied into the library straight out of the `.nar` (from the inbox). No extracted copies are kept elsewhere.
+  - The review UI labels them **◈ Rich** (the finished photo) and **◈ flash frame** / **◈ no flash frame** / **◈ flash + no-flash blend frame**.
+- **Upgrading:** packages that earlier versions filed in `unsorted_files` as "other" are upgraded on the next run, and their unsorted copies are removed.
+- **Windows Phone filenames** (`WP_20151004_06_56_36`) are also recognized as dates.
+
 ## 6. Review UI
 
 - **`psort review`** starts a local Flask app at `http://localhost:5000`. It listens on 127.0.0.1 only and has no login. It refuses requests whose Host isn't `localhost`/`127.0.0.1`, and every change needs a token that's created fresh each time the app starts. Together these stop a web page elsewhere from driving it.

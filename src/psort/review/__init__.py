@@ -483,7 +483,10 @@ CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.cl
     (SELECT group_concat(post, ', ') FROM (SELECT post FROM exports WHERE sha256 = p.sha256 ORDER BY post)) AS posts,
     (SELECT c.sha256 FROM live_clips c JOIN sources s ON s.path = c.photo_path
         WHERE s.sha256 = p.sha256 LIMIT 1) AS live_clip,
-    EXISTS (SELECT 1 FROM favorites fv WHERE fv.sha256 = p.sha256) AS favorite"""
+    EXISTS (SELECT 1 FROM favorites fv WHERE fv.sha256 = p.sha256) AS favorite,
+    EXISTS (SELECT 1 FROM rich_packages r JOIN sources rs ON rs.path = r.photo_path
+            WHERE rs.sha256 = p.sha256) AS rich,
+    (SELECT COALESCE(d.label, d.member) FROM derived_frames d WHERE d.sha256 = p.sha256) AS rich_frame"""
 
 
 def folder_key(library_path: str) -> str:

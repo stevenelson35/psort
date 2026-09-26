@@ -31,11 +31,18 @@ def _move(root: Path, rel: str | None, new_rel: str) -> str | None:
     return new_rel
 
 
-def _clips_of(conn: sqlite3.Connection, sha: str) -> list[sqlite3.Row]:
-    return conn.execute(
+def _companions(conn: sqlite3.Connection, sha: str) -> list[tuple[str, str, str | None]]:
+    """(table, sha256, library_path) of files that live beside this photo: its Live Photo clip,
+    and any Rich Capture package it's the home of."""
+    from .rich import package_photo_sha
+
+    out = [("live_clips", r["sha256"], r["library_path"]) for r in conn.execute(
         "SELECT DISTINCT c.sha256, c.library_path FROM live_clips c JOIN sources s ON s.path = c.photo_path "
-        "WHERE s.sha256 = ?", (sha,)
-    ).fetchall()
+        "WHERE s.sha256 = ?", (sha,))]
+    for r in conn.execute("SELECT sha256, library_path FROM rich_packages").fetchall():
+        if package_photo_sha(conn, r["sha256"]) == sha:
+            out.append(("rich_packages", r["sha256"], r["library_path"]))
+    return out
 
 
 def delete(cfg: Config, conn: sqlite3.Connection, shas: list[str]) -> int:
@@ -47,14 +54,16 @@ def delete(cfg: Config, conn: sqlite3.Connection, shas: list[str]) -> int:
         row = conn.execute("SELECT * FROM photos WHERE sha256 = ?", (sha,)).fetchone()
         if row is None:
             raise TrashError(f"No photo {sha[:12]}…")
+        companions = _companions(conn, sha)  # before the photo leaves `photos`
         trash_path = _move(lib, row["library_path"], f"{TRASH_DIR}/{row['library_path']}") if row["library_path"] else None
-        for clip in _clips_of(conn, sha):  # the Live Photo clip goes with it
-            moved = _move(lib, clip["library_path"], f"{TRASH_DIR}/{clip['library_path']}")
+        for table, csha, cpath in companions:  # its Live Photo clip / Rich Capture package go with it
+            moved = _move(lib, cpath, f"{TRASH_DIR}/{cpath}")
             if moved:
-                conn.execute("UPDATE live_clips SET library_path = ? WHERE sha256 = ?", (moved, clip["sha256"]))
+                conn.execute(f"UPDATE {table} SET library_path = ? WHERE sha256 = ?", (moved, csha))
+        data = dict(row) | {"_companions": [(table, csha) for table, csha, _ in companions]}
         conn.execute(
             "INSERT OR REPLACE INTO deleted_photos (sha256, name, ext, taken_at, data, trash_path) VALUES (?,?,?,?,?,?)",
-            (sha, row["name"], row["ext"], row["taken_at"], json.dumps(dict(row)), trash_path),
+            (sha, row["name"], row["ext"], row["taken_at"], json.dumps(data), trash_path),
         )
         conn.execute("DELETE FROM photos WHERE sha256 = ?", (sha,))
         face_ids = [r["id"] for r in conn.execute("SELECT id FROM faces WHERE sha256 = ?", (sha,))]
@@ -87,17 +96,18 @@ def restore(cfg: Config, conn: sqlite3.Connection, sha: str) -> None:
 def empty(cfg: Config, conn: sqlite3.Connection) -> int:
     """Delete trashed files for good. They stay remembered, so they're never copied back."""
     lib = cfg.library
-    rows = conn.execute("SELECT sha256, trash_path FROM deleted_photos WHERE purged = 0").fetchall()
+    rows = conn.execute("SELECT sha256, trash_path, data FROM deleted_photos WHERE purged = 0").fetchall()
     for r in rows:
         if r["trash_path"] and (lib / r["trash_path"]).exists():
             (lib / r["trash_path"]).unlink()
             _remove_empty_parents(lib / r["trash_path"], lib)
-        for clip in _clips_of(conn, r["sha256"]):
-            if clip["library_path"] and clip["library_path"].startswith(TRASH_DIR + "/"):
-                if (lib / clip["library_path"]).exists():
-                    (lib / clip["library_path"]).unlink()
-                    _remove_empty_parents(lib / clip["library_path"], lib)
-                conn.execute("UPDATE live_clips SET library_path = NULL WHERE sha256 = ?", (clip["sha256"],))
+        for table, csha in json.loads(r["data"]).get("_companions", []):
+            c = conn.execute(f"SELECT library_path FROM {table} WHERE sha256 = ?", (csha,)).fetchone()
+            if c and c["library_path"] and c["library_path"].startswith(TRASH_DIR + "/"):
+                if (lib / c["library_path"]).exists():
+                    (lib / c["library_path"]).unlink()
+                    _remove_empty_parents(lib / c["library_path"], lib)
+                conn.execute(f"UPDATE {table} SET library_path = NULL WHERE sha256 = ?", (csha,))
         conn.execute("UPDATE deleted_photos SET purged = 1, trash_path = NULL WHERE sha256 = ?", (r["sha256"],))
     conn.commit()
     return len(rows)

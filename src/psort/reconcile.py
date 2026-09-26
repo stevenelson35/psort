@@ -39,6 +39,7 @@ def _expected(cfg: Config, conn: sqlite3.Connection) -> list[Expected]:
     specs = [
         ("photos", cfg.library, "library_path", "photo"),
         ("live_clips", cfg.library, "library_path", "Live Photo clip"),
+        ("rich_packages", cfg.library, "library_path", "Rich Capture package"),
         ("deleted_photos", cfg.library, "trash_path", "trashed photo"),
         ("videos", cfg.videos, "library_path", "video"),
         ("other_files", cfg.unsorted, "library_path", "unsorted file"),

@@ -21,6 +21,8 @@
     </a>
     <div class="meta">
       <strong>{{ s.name }}</strong>
+      {% if s.rich %}<span class="pill" title="Nokia Rich Capture: its frames are in this moment, and the .nar package is kept beside it">◈ Rich</span>{% endif %}
+      {% if s.rich_frame %}<span class="pill" title="A frame from a Nokia Rich Capture package">◈ {{ s.rich_frame }} frame</span>{% endif %}
       {{ post(url_for('favorite', sha=s.sha256), "★ Favorite" if s.favorite else "☆ Add to favorites",
               "star on" if s.favorite else "star") }}
       {% if s.is_best %}<span class="pill ok">★ best</span>{% endif %}
