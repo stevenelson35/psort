@@ -8,7 +8,7 @@ import cv2
 import imagehash
 import numpy as np
 import pillow_heif
-from PIL import Image, ImageOps
+from PIL import Image
 
 pillow_heif.register_heif_opener()
 cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)  # hide backend chatter
@@ -98,6 +98,28 @@ def _sharpness(gray: np.ndarray) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
+_ORIENTATION_TRANSPOSE = {
+    2: Image.Transpose.FLIP_LEFT_RIGHT,
+    3: Image.Transpose.ROTATE_180,
+    4: Image.Transpose.FLIP_TOP_BOTTOM,
+    5: Image.Transpose.TRANSPOSE,
+    6: Image.Transpose.ROTATE_270,
+    7: Image.Transpose.TRANSVERSE,
+    8: Image.Transpose.ROTATE_90,
+}
+
+
+def upright(im: Image.Image) -> Image.Image:
+    """Apply the EXIF orientation to the pixels. Unlike ImageOps.exif_transpose, this doesn't
+    rebuild the EXIF block, which crashes Pillow on some odd metadata (e.g. Windows Phone
+    'Rich Capture' photos). Always returns a new, loaded image."""
+    try:
+        method = _ORIENTATION_TRANSPOSE.get(im.getexif().get(_TAG_ORIENTATION, 1))
+    except Exception:
+        method = None
+    return im.transpose(method) if method else im.copy()
+
+
 def load_small(path: Path) -> tuple[Image.Image, Image.Exif, int, int]:
     """Upright RGB copy at analysis size, plus EXIF and the full upright width/height."""
     with Image.open(path) as im:
@@ -106,7 +128,7 @@ def load_small(path: Path) -> tuple[Image.Image, Image.Exif, int, int]:
         if exif.get(_TAG_ORIENTATION) in (5, 6, 7, 8):
             width, height = height, width
         im.draft("RGB", (ANALYSIS_SIZE, ANALYSIS_SIZE))  # fast JPEG downscale; no-op otherwise
-        small = ImageOps.exif_transpose(im).convert("RGB")
+        small = upright(im).convert("RGB")
     small.thumbnail((ANALYSIS_SIZE, ANALYSIS_SIZE))
     return small, exif, width, height
 

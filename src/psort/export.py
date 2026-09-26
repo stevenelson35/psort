@@ -6,10 +6,11 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image
 
 from .config import Config
 from .events import slugify
+from .imaging import upright
 
 MAX_EDGE = 2048  # the blog's largest responsive size
 QUALITY = 85
@@ -56,7 +57,7 @@ def render(src: Path, dest: Path, description: str | None = None, keywords: list
             exif[_XP_KEYWORDS] = ";".join(keywords).encode("utf-16-le") + b"\0\0"
         icc = im.info.get("icc_profile")  # keeps colors right (e.g. iPhone Display P3)
         im.draft("RGB", (MAX_EDGE, MAX_EDGE))
-        img = ImageOps.exif_transpose(im)
+        img = upright(im)
     if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
         rgba = img.convert("RGBA")
         img = Image.new("RGB", rgba.size, "white")
@@ -66,8 +67,12 @@ def render(src: Path, dest: Path, description: str | None = None, keywords: list
     img.info = {}  # otherwise Pillow carries the original's JPEG comment across
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(dest.name + ".partial")
+    try:
+        exif_bytes = exif.tobytes()
+    except Exception:  # odd source metadata that can't be re-encoded: export without it
+        exif_bytes = b""
     img.save(partial, "JPEG", quality=QUALITY, optimize=True, progressive=True,
-             exif=exif.tobytes(), **({"icc_profile": icc} if icc else {}))
+             **({"exif": exif_bytes} if exif_bytes else {}), **({"icc_profile": icc} if icc else {}))
     os.replace(partial, dest)
 
 

@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, send_file, url_for
-from PIL import Image, ImageOps
+from PIL import Image
 
 from .. import actions
 from .. import export as export_mod
@@ -20,6 +20,7 @@ from .. import blog as blog_mod
 from ..config import DEFAULT_CONFIG_PATH, Config
 from ..dates import UNCERTAIN, sql_in
 from ..db import connect
+from ..imaging import upright
 from ..winpath import windows_path
 
 THUMB_SIZES = {320, 1280}
@@ -537,7 +538,7 @@ def _thumbnail(cfg: Config, src: Path, sha: str, size: int) -> Path:
     if not out.exists():
         with Image.open(src) as im:
             im.draft("RGB", (size, size))
-            img = ImageOps.exif_transpose(im).convert("RGB")
+            img = upright(im).convert("RGB")
         img.thumbnail((size, size), Image.LANCZOS)
         _save_atomic(img, out)
     return out

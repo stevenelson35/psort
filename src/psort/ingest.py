@@ -38,6 +38,7 @@ class IngestStats:
     deleted: int = 0  # photos you deleted in psort, seen again in the inbox
     arriving: int = 0  # still being copied in: left for the next run
     replaced: int = 0  # changed since last seen (e.g. a partial copy finished): old copies cleaned up
+    recovered: int = 0  # unreadable before, read fine now
 
 
 def batch_of(rel: Path) -> str:
@@ -152,7 +153,8 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
         known = conn.execute("SELECT size, mtime, status, sha256 FROM sources WHERE path = ?", (str(rel),)).fetchone()
         # Unchanged files are skipped, except ones recorded without a copy by an earlier version.
         if (known and known["size"] == st.st_size and known["mtime"] == st.st_mtime
-                and (known["sha256"] is not None or known["status"] == "junk")):
+                and (known["sha256"] is not None or known["status"] == "junk")
+                and known["status"] != "error"):  # unreadable last time: try again (psort may have improved)
             stats.unchanged += 1
             continue
 
@@ -195,9 +197,12 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
                 _record_source(conn, rel, st, "error", reason)  # can't even read it; verify will flag it
             stats.errors += 1
 
-        new = conn.execute("SELECT sha256 FROM sources WHERE path = ?", (str(rel),)).fetchone()
+        new = conn.execute("SELECT sha256, status FROM sources WHERE path = ?", (str(rel),)).fetchone()
         if old_sha and new and new["sha256"] != old_sha and forget_content(cfg, conn, old_sha):
             stats.replaced += 1
+        if known and known["status"] == "error" and new and new["status"] != "error":
+            stats.recovered += 1
+            _drop_unsorted_copy(cfg, conn, new["sha256"])
 
         if n % 100 == 0:
             conn.commit()
@@ -240,6 +245,20 @@ def forget_content(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
             conn.execute(f"DELETE FROM {table} WHERE sha256 = ?", (sha,))
         conn.commit()
     return removed
+
+
+def _drop_unsorted_copy(cfg: Config, conn: sqlite3.Connection, sha: str | None) -> None:
+    """A file that was kept in unsorted_files only because it couldn't be read, and now can."""
+    if not sha or conn.execute("SELECT 1 FROM sources WHERE sha256 = ? AND status IN ('other', 'sidecar', 'error')",
+                               (sha,)).fetchone():
+        return
+    row = conn.execute("SELECT library_path FROM other_files WHERE sha256 = ?", (sha,)).fetchone()
+    if row:
+        if row["library_path"] and (cfg.unsorted / row["library_path"]).exists():
+            (cfg.unsorted / row["library_path"]).unlink()
+            _remove_empty(cfg.unsorted / row["library_path"], cfg.unsorted)
+        conn.execute("DELETE FROM other_files WHERE sha256 = ?", (sha,))
+        conn.commit()
 
 
 def _remove_empty(path: Path, root: Path) -> None:

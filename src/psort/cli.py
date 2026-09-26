@@ -446,6 +446,8 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
     if s.arriving:
         typer.secho(f"{s.arriving} file(s) still arriving (changed in the last {cfg.settle_seconds:.0f}s): "
                     "left for the next run.", fg="yellow")
+    if s.recovered:
+        typer.echo(f"{s.recovered} previously unreadable file(s) read fine now and moved out of unsorted_files.")
     if s.replaced:
         typer.echo(f"{s.replaced} file(s) changed since last seen (e.g. a copy finished): old copies cleaned up.")
     if s.redated:
