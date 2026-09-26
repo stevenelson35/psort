@@ -32,6 +32,7 @@ class Config:
     videos_dir: Path | None = None  # default: a videos/ folder beside the library
     unsorted_dir: Path | None = None  # default: an unsorted_files/ folder beside the library
     highlights_dir: Path | None = None  # default: a highlights/ folder beside the library
+    settle_seconds: float = 120.0  # files changed more recently than this are still arriving
     burst_gap_seconds: float = 10.0
     phash_threshold: int = 10
     close_call_margin: float = 0.05
@@ -82,6 +83,7 @@ def load(path: Path) -> Config:
     try:
         paths = data["paths"]
         cluster = data.get("cluster", {})
+        inbox_opts = data.get("inbox", {})
         events = data.get("events", {})
         faces = data.get("faces", {})
         return Config(
@@ -93,6 +95,7 @@ def load(path: Path) -> Config:
             unsorted_dir=Path(paths["unsorted"]).expanduser() if "unsorted" in paths else None,
             highlights_dir=Path(paths["highlights"]).expanduser() if "highlights" in paths else None,
             burst_gap_seconds=float(cluster.get("burst_gap_seconds", 10.0)),
+            settle_seconds=float(inbox_opts.get("settle_seconds", 120.0)),
             phash_threshold=int(cluster.get("phash_threshold", 10)),
             close_call_margin=float(cluster.get("close_call_margin", 0.05)),
             duplicate_gap_seconds=float(cluster.get("duplicate_gap_seconds", 1.0)),
@@ -124,6 +127,11 @@ unsorted = {q(library.parent / "unsorted_files")}
 # Small copies of your favorites, kept in sync automatically (same folders and names as the library).
 highlights = {q(library.parent / "highlights")}
 state_dir = {q(state_dir)}
+
+[inbox]
+# Files changed within this many seconds are treated as still being copied in and left for the
+# next run, so psort never records a half-copied file.
+settle_seconds = 120
 
 [cluster]
 # Shots this close together in time AND this visually similar form one moment.

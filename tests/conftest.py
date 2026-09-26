@@ -103,4 +103,6 @@ def psort(tmp_path: Path, sample_inbox: Path):
         "--state-dir", str(tmp_path / "state"),
         "--no-face-model",
     )
+    # Test files are all brand new, so don't wait for them to "settle" (tests of that set it back).
+    config.write_text(config.read_text().replace("settle_seconds = 120", "settle_seconds = 0"))
     return invoke

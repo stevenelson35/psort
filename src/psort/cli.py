@@ -443,6 +443,11 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
         f"{s.others} other files, {s.errors} unreadable"
         + (f", {s.deleted} you deleted before (not copied)" if s.deleted else "")
     )
+    if s.arriving:
+        typer.secho(f"{s.arriving} file(s) still arriving (changed in the last {cfg.settle_seconds:.0f}s): "
+                    "left for the next run.", fg="yellow")
+    if s.replaced:
+        typer.echo(f"{s.replaced} file(s) changed since last seen (e.g. a copy finished): old copies cleaned up.")
     if s.redated:
         typer.echo(f"Dated {s.redated} earlier undated photo(s) from their folder names")
     if s.new_videos or s.live_clips:

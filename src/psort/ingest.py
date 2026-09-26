@@ -1,6 +1,7 @@
 """Stage 1: scan the inbox (read-only) and record every file (DESIGN.md §5.1)."""
 
 import sqlite3
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,6 +36,8 @@ class IngestStats:
     others: int = 0  # everything else, kept in unsorted_files
     junk: int = 0  # OS caches like Thumbs.db: not copied
     deleted: int = 0  # photos you deleted in psort, seen again in the inbox
+    arriving: int = 0  # still being copied in: left for the next run
+    replaced: int = 0  # changed since last seen (e.g. a partial copy finished): old copies cleaned up
 
 
 def batch_of(rel: Path) -> str:
@@ -153,8 +156,15 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
             stats.unchanged += 1
             continue
 
+        # Still being copied in? Windows keeps a file's change time current while it's written (its
+        # size is often reserved up front), so a recently touched file is left for the next run.
+        if time.time() - max(st.st_mtime, st.st_ctime) < cfg.settle_seconds:
+            stats.arriving += 1
+            continue
+
         kind = kind_of(path)
         ext = path.suffix.lower()
+        old_sha = known["sha256"] if known else None
         try:
             if kind == "junk":
                 _record_source(conn, rel, st, "junk", "OS cache file (rebuilt automatically; not needed)")
@@ -171,13 +181,23 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
             else:
                 _ingest_other(conn, path, rel, st, "other", f"not a photo or video ('{ext or 'no extension'}')")
                 stats.others += 1
+        except StillArriving:
+            stats.arriving += 1
+            continue
         except Exception as e:  # corrupt or truncated file: keep its bytes in unsorted_files anyway
             reason = f"unreadable: {type(e).__name__}: {e}"
             try:
                 _ingest_other(conn, path, rel, st, "error", reason)
+            except StillArriving:  # "unreadable" only because it's half-copied
+                stats.arriving += 1
+                continue
             except OSError:
                 _record_source(conn, rel, st, "error", reason)  # can't even read it; verify will flag it
             stats.errors += 1
+
+        new = conn.execute("SELECT sha256 FROM sources WHERE path = ?", (str(rel),)).fetchone()
+        if old_sha and new and new["sha256"] != old_sha and forget_content(cfg, conn, old_sha):
+            stats.replaced += 1
 
         if n % 100 == 0:
             conn.commit()
@@ -189,6 +209,46 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
     return stats
 
 
+class StillArriving(Exception):
+    """The file changed while psort was reading it."""
+
+
+def _steady(path: Path, st) -> None:
+    now = path.stat()
+    if (now.st_size, now.st_mtime) != (st.st_size, st.st_mtime):
+        raise StillArriving
+
+
+def forget_content(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
+    """Remove psort's copies of content no inbox file has any more (the partial version of a file
+    that has since finished copying). Only ever touches files psort made."""
+    if conn.execute("SELECT 1 FROM sources WHERE sha256 = ?", (sha,)).fetchone():
+        return False  # still in the inbox somewhere
+    removed = False
+    for table, root in (("photos", cfg.library), ("videos", cfg.videos), ("other_files", cfg.unsorted),
+                        ("live_clips", cfg.library)):
+        row = conn.execute(f"SELECT library_path FROM {table} WHERE sha256 = ?", (sha,)).fetchone()
+        if row is None:
+            continue
+        if row["library_path"] and (root / row["library_path"]).exists():
+            (root / row["library_path"]).unlink()
+            _remove_empty(root / row["library_path"], root)
+        conn.execute(f"DELETE FROM {table} WHERE sha256 = ?", (sha,))
+        removed = True
+    if removed:
+        for table in ("faces", "favorites", "tray", "tags"):
+            conn.execute(f"DELETE FROM {table} WHERE sha256 = ?", (sha,))
+        conn.commit()
+    return removed
+
+
+def _remove_empty(path: Path, root: Path) -> None:
+    parent = path.parent
+    while parent != root and parent.is_dir() and not any(parent.iterdir()):
+        parent.rmdir()
+        parent = parent.parent
+
+
 def _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats) -> None:
     sha = sha256_file(path)
     if conn.execute("SELECT 1 FROM photos WHERE sha256 = ?", (sha,)).fetchone():
@@ -197,6 +257,7 @@ def _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats) -> None:
         stats.deleted += 1  # you deleted it: never copied back
     else:
         a = analyze(path, detector)
+        _steady(path, st)  # don't record a file that changed while we read it
         taken, source = _taken_at(path, rel, a.exif_datetime, st.st_mtime)
         conn.execute(
             """INSERT INTO photos (sha256, ext, taken_at, tz_offset, date_source, camera, width, height,
@@ -213,6 +274,7 @@ def _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats) -> None:
 def _ingest_video(conn, path, rel, st, ext, sibling_names: dict[str, str], stats) -> None:
     info = videos_mod.probe(path)
     sha = sha256_file(path)
+    _steady(path, st)
     if videos_mod.is_live_photo_clip(path, set(sibling_names), info.duration):
         photo_name = next(sibling_names[f"{path.stem.lower()}{e}"] for e in (".heic", ".heif", ".jpg", ".jpeg")
                           if f"{path.stem.lower()}{e}" in sibling_names)
@@ -238,5 +300,6 @@ def _ingest_video(conn, path, rel, st, ext, sibling_names: dict[str, str], stats
 
 def _ingest_other(conn, path, rel, st, status: str, reason: str) -> None:
     sha = sha256_file(path)
+    _steady(path, st)
     conn.execute("INSERT OR IGNORE INTO other_files (sha256) VALUES (?)", (sha,))
     _record_source(conn, rel, st, status, reason, sha)

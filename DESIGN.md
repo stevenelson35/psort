@@ -80,6 +80,13 @@ inbox ──ingest──► state DB ──cluster──► moments ──score�
   - **Other data:** camera model, width and height, orientation, screenshot flag (PNG, no camera EXIF, or screenshot-style name).
 - Records every skipped file (videos, unreadable files, unknown types), with its reason.
 
+- **Safe to run while files are still being copied in:**
+  - **What Windows does**, verified with Explorer-style and robocopy copies on this PC: during a copy the destination has its **full size from the start**, and its modified/changed time **updates every second**. When the copy completes, the modified time is set back to the original's.
+  - So any file changed within `settle_seconds` (default 120, set under `[inbox]`) is skipped as **still arriving** and picked up on a later run. A finished copy carries its original date, so it's processed right away.
+  - psort also re-checks each file after reading it. If it changed meanwhile, it's skipped rather than recorded.
+  - If a partial file ever does slip through and later changes at the same path, psort removes the copies it made of the old version. It does this only when no other inbox file has that content.
+  - Moving a finished batch into the inbox **on the same drive** is instant, and always safe.
+
 ### 5.2 Cluster (moments)
 
 - A **moment** is a burst of near-identical shots.

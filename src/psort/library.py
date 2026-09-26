@@ -274,7 +274,7 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> l
         src = conn.execute("SELECT * FROM sources WHERE path = ?", (str(rel),)).fetchone()
         st = path.stat()
         if src is None:
-            results.append(VerifyResult(str(rel), False, "not ingested yet (run `psort run`)"))
+            results.append(VerifyResult(str(rel), False, "not ingested yet (run `psort run`, or it's still arriving)"))
         elif src["size"] != st.st_size or src["mtime"] != st.st_mtime:
             results.append(VerifyResult(str(rel), False, "changed since it was ingested (run `psort run`)"))
         elif src["status"] == "junk":
