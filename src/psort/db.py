@@ -121,10 +121,17 @@ CREATE TABLE IF NOT EXISTS highlights (
     stamp     TEXT NOT NULL            -- what it was rendered from; re-rendered when this changes
 );
 
--- Photos picked for the next blog post (exported in the next stage).
+-- Photos picked for the next blog post, in post order.
 CREATE TABLE IF NOT EXISTS tray (
     sha256    TEXT PRIMARY KEY REFERENCES photos(sha256),
-    added_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    added_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    position  INTEGER NOT NULL DEFAULT 0
+);
+
+-- The post being composed (title, captions, ...), as JSON. One at a time.
+CREATE TABLE IF NOT EXISTS post_draft (
+    id    INTEGER PRIMARY KEY CHECK (id = 1),
+    data  TEXT NOT NULL
 );
 
 -- Which photos went into which post (by outbox folder name).
@@ -152,6 +159,7 @@ _ADDED_COLUMNS = [
     ("photos", "close_call", "INTEGER NOT NULL DEFAULT 0"),
     ("photos", "faces_scanned", "INTEGER NOT NULL DEFAULT 0"),
     ("photos", "duplicate_of", "TEXT"),
+    ("tray", "position", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

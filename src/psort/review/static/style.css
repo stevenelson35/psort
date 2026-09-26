@@ -78,3 +78,16 @@ details.live video { width: 100%; max-height: 360px; background: var(--photo-bg)
 button.star { background: none; border: none; font-size: 1.15rem; line-height: 1; padding: 0 .25rem; color: var(--muted); }
 button.star.on { color: var(--warn); }
 .shot .meta button.star { font-size: .95rem; border: 1px solid var(--line); padding: .25rem .6rem; }
+.composer .fields { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin: .6rem 0; }
+.composer label { display: flex; flex-direction: column; gap: .2rem; font-size: .88rem; color: var(--muted); }
+.composer label.wide { margin: .5rem 0; }
+.composer .grow { flex: 1; }
+.composer textarea, .composer label.wide input { width: 100%; font: inherit; padding: .35rem .45rem; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--surface-2); color: var(--fg); }
+.post-photo { display: flex; gap: .8rem; align-items: flex-start; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: .6rem; margin: .6rem 0; }
+.post-photo img { width: 200px; border-radius: 6px; }
+.actions { margin-top: 1rem; }
+.small { font-size: .8rem; }
+pre.post-text { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .8rem;
+  white-space: pre-wrap; font-size: .85rem; }

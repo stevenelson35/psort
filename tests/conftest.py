@@ -90,8 +90,8 @@ def psort(tmp_path: Path, sample_inbox: Path):
     runner = CliRunner()
     config = tmp_path / "psort.toml"
 
-    def invoke(*args: str, expect: int = 0):
-        result = runner.invoke(app, ["--config", str(config), *args])
+    def invoke(*args: str, expect: int = 0, input: str | None = None):
+        result = runner.invoke(app, ["--config", str(config), *args], input=input)
         assert result.exit_code == expect, result.output + repr(result.exception)
         return result
 

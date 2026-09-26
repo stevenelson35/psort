@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ "Published" if mode == "publish" else "Preview" }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('tray') }}">← Post tray</a></p>
+{% if mode == "publish" %}
+  <h1>Published 🎉</h1>
+  <p>Your post will be live at <a href="{{ url }}" target="_blank">{{ url }}</a> in a couple of minutes, once GitHub
+    finishes rebuilding the site.</p>
+{% elif mode == "dryrun" %}
+  <h1>Dry run</h1>
+  <p class="muted">Everything was built locally; nothing was uploaded or committed. Files: <code>{{ staged }}</code></p>
+{% else %}
+  <h1>Preview</h1>
+{% endif %}
+{% if log %}<ul>{% for line in log %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+<p><strong>{{ filename }}</strong>{% if mode != "publish" %} → <span class="muted">{{ url }}</span>{% endif %}</p>
+<pre class="post-text">{{ text }}</pre>
+{% endblock %}

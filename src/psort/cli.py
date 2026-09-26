@@ -11,6 +11,7 @@ import typer
 from . import config as config_mod
 from . import events as events_mod
 from . import faces as faces_mod
+from . import blog as blog_mod
 from . import highlights as highlights_mod
 from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
 from .dates import UNCERTAIN, sql_in
@@ -144,7 +145,7 @@ def review(port: Annotated[int, typer.Option(help="Port on 127.0.0.1.")] = 5000)
 
     cfg, _ = _open()
     typer.echo(f"psort review running at http://localhost:{port}  (Ctrl+C to stop)")
-    create_app(cfg).run(host="127.0.0.1", port=port, threaded=True)
+    create_app(cfg, _config_path).run(host="127.0.0.1", port=port, threaded=True)
 
 
 @app.command("export")
@@ -194,6 +195,41 @@ def status() -> None:
         typer.echo(f"{label + ':':19}{conn.execute(sql).fetchone()[0]}")
     typer.echo(f"{'Face detection:':19}{'on' if cfg.face_model.exists() else 'off (model not downloaded)'}")
     typer.echo(f"{'Face recognition:':19}{'on' if cfg.recognition_model.exists() else 'off (model not downloaded)'}")
+
+
+@app.command("blog-login")
+def blog_login(
+    user: Annotated[str, typer.Option(help="FTP username.")] = "sjnelson@itsallonesong.com",
+    host: Annotated[str, typer.Option(help="FTP server (Turbify's name matches its TLS certificate).")] = "cpanel292.turbify.biz",
+    remote_dir: Annotated[str, typer.Option(help="Blog photos folder, from the FTP account's top.")] = "pics/blog",
+    repo: Annotated[Path, typer.Option(help="Your local blog repo.")] = Path.home() / "repos/stevenelson35.github.io",
+    site_url: Annotated[str, typer.Option(help="The blog's address.")] = "https://blog.itsallonesong.com",
+    tls: Annotated[bool, typer.Option(hidden=True)] = True,
+    port: Annotated[int, typer.Option(hidden=True)] = 21,
+) -> None:
+    """Test your Turbify FTP login and save it for publishing posts (password stays on this PC)."""
+    _open()  # make sure psort is set up
+    s = blog_mod.BlogSettings(repo=repo.expanduser().resolve(), ftp_host=host, ftp_user=user, remote_dir=remote_dir,
+                              site_url=site_url, ftp_tls=tls, ftp_port=port)
+    password = typer.prompt(f"FTP password for {user}", hide_input=True)
+    typer.echo(f"Connecting to {host}{' with TLS' if tls else ''}…")
+    try:
+        up = blog_mod.Uploader(s, password)
+    except blog_mod.BlogError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    sample = up.check()
+    up.close()
+    if not sample:
+        typer.secho(f"Logged in, but {remote_dir}/1024 has no photos. Is {remote_dir!r} the blog photos folder?",
+                    fg="yellow")
+        raise typer.Exit(1)
+    typer.echo(f"Login OK. {remote_dir}/1024 has photos such as {', '.join(sample)}.")
+    if not (s.posts_dir).is_dir():
+        typer.secho(f"Warning: {s.posts_dir} not found. Check --repo.", fg="yellow")
+    blog_mod.save_password(password)
+    blog_mod.write_settings(_config_path, s)
+    typer.echo(f"Saved. Settings are in {_config_path} [blog]; the password is in {blog_mod.SECRETS_PATH} (private).")
 
 
 @app.command("highlights")

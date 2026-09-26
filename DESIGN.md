@@ -265,12 +265,35 @@ psort-library/
 2. Open `blogupdate.html` as you do today. In each image block, the Cloudinary widget's file picker opens the outbox folder.
 3. Everything after that is unchanged: Cloudinary → `process-blog-post.yml` makes the 640–2048 sizes → uploads to Turbify `pics/blog/` → commits the post.
 
-### Phase 2: direct publishing (future)
+### Phase 2: direct publishing (built)
 
-- psort uploads the exported photos and their 640–2048 sizes straight to Turbify `pics/blog/<size>/<name>-<size>.jpg` over **SFTP** (with `paramiko`, which needs no sudo).
-- psort writes a small index of published photos that `blogupdate.html` can offer as a picker.
-- The workflow gets a small change: when an image block has a filename but no Cloudinary URL, it skips downloading and resizing, because the photo is already on Turbify.
-- This removes the Cloudinary round-trip and its free-tier limits.
+The **Post tray** page is a composer:
+- **Post settings:**
+  - new post, or add to an existing one
+  - title, and a date that defaults to the first photo's day
+  - author, chosen from `_authors`
+  - categories and tags, with suggestions from your existing posts
+- **Content:**
+  - opening text
+  - each photo with a **text-before** box and an **alt-text** box, reorderable with ↑/↓
+  - YouTube ID, closing text, and a quote with attribution
+- **Save draft**, **Preview post** (the exact `.md` file), **Dry run** (builds everything locally, uploads and commits nothing), and **Publish to blog**.
+
+Publish does the following:
+1. **Images.** For each photo: the web copy (upright, ≤2048px, GPS-free) plus the blog's responsive sizes 2048/1920/1600/1366/1024/768/640, sized by width and never enlarged. These match `create_responsive_images.py`.
+2. **Upload** over **FTP with TLS** (explicit FTPS, certificate verified) to `cpanel292.turbify.biz`, into `pics/blog/` and `pics/blog/<size>/`.
+   - Turbify's certificate names that server, not `ftp.itsallonesong.com`.
+   - Files already there are skipped.
+   - A *different* file with the same name is never overwritten; the publish stops before anything is committed.
+3. **Post.** Written in exactly the format `process-blog-post.yml` produces, as `YYYY-MM-DD-<title-slug>.md`, or appended to the chosen post.
+4. **Git.** `git pull --ff-only` first, so phone posts don't conflict. Then psort commits **only that post file** and pushes. Your deploy workflow rebuilds the site.
+5. **Link.** The page shows the post's URL: `/<categories>/YYYY/MM/DD/<slug>.html`. The photos are recorded as posted, and the tray and draft are cleared.
+
+**Setup:** `psort blog-login` tests the login, confirms `pics/blog/1024` has photos, and saves the settings.
+- Settings go in `[blog]` in `psort.toml`.
+- The password goes in `~/.config/psort/secrets.toml`, which is readable only by you. psort refuses to use it if other users can read it.
+
+The old route (Export only → outbox → `blogupdate.html`) still works.
 
 ### Out of scope
 

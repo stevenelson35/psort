@@ -16,7 +16,8 @@ from .. import export as export_mod
 from .. import events as events_mod
 from .. import faces as faces_mod
 from .. import videos as videos_mod
-from ..config import Config
+from .. import blog as blog_mod
+from ..config import DEFAULT_CONFIG_PATH, Config
 from ..dates import UNCERTAIN, sql_in
 from ..db import connect
 from ..winpath import windows_path
@@ -25,8 +26,9 @@ THUMB_SIZES = {320, 1280}
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 
-def create_app(cfg: Config) -> Flask:
+def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     app = Flask(__name__)
+    config_path = config_path or DEFAULT_CONFIG_PATH
     token = secrets.token_urlsafe(32)
     app.secret_key = token
     # A global, not just template context: macros imported from _macros.html can't see context.
@@ -178,15 +180,66 @@ def create_app(cfg: Config) -> Flask:
         ).fetchall()
         return render_template("undated.html", photos=photos)
 
+    def blog_settings():
+        try:
+            return blog_mod.settings(config_path)
+        except blog_mod.BlogError:
+            return None
+
     @app.get("/tray")
     def tray():
         photos = db().execute(
-            f"SELECT {CARD_COLUMNS} FROM photos p JOIN tray t ON t.sha256 = p.sha256 ORDER BY p.taken_at, p.name"
+            f"""SELECT {CARD_COLUMNS}, p.taken_at FROM photos p JOIN tray t ON t.sha256 = p.sha256
+                ORDER BY t.position, p.taken_at, p.name"""
         ).fetchall()
         posts = db().execute(
             "SELECT post, COUNT(*) AS photos, MAX(exported_at) AS last FROM exports GROUP BY post ORDER BY last DESC LIMIT 10"
         ).fetchall()
-        return render_template("tray.html", photos=photos, posts=posts, outbox=windows_path(cfg.outbox))
+        s = blog_settings()
+        draft = blog_mod.load_draft(db())
+        if s and not draft.author:
+            draft.author = s.default_author
+        return render_template("tray.html", photos=photos, posts=posts, outbox=windows_path(cfg.outbox),
+                               draft=draft, blog=s, choices=blog_mod.blog_choices(s) if s else None,
+                               first_date=photos[0]["taken_at"][:10] if photos else "")
+
+    @app.post("/tray/<sha>/move")
+    def tray_move(sha):
+        return act(actions.move_in_tray, db(), sha, request.form.get("step", 0, type=int), default="/tray")
+
+    @app.post("/tray/compose")
+    def tray_compose():
+        f = request.form
+        shas = [r["sha256"] for r in db().execute("SELECT sha256 FROM tray")]
+        draft = blog_mod.Draft(
+            **{k: f.get(k, "") for k in ("title", "author", "categories", "tags", "top_text", "youtube_id",
+                                         "bottom_text", "quote", "quote_attribution", "existing_post", "post_date")},
+            captions={sha: {"text_before": f.get(f"text_before_{sha}", ""), "alt": f.get(f"alt_{sha}", "")}
+                      for sha in shas},
+        )
+        blog_mod.save_draft(db(), draft)
+        action = f.get("action", "save")
+        if action == "save":
+            flash("Draft saved.", "ok")
+            return redirect(url_for("tray"))
+        s = blog_settings()
+        if s is None:
+            flash("Publishing isn't set up yet: run `psort blog-login` in a terminal first.", "error")
+            return redirect(url_for("tray"))
+        try:
+            photos = blog_mod.tray_photos(db())
+            filename = blog_mod.post_filename(draft, photos)
+            if action == "preview":
+                existing = (s.posts_dir / filename).read_text() if draft.existing_post and (s.posts_dir / filename).exists() else None
+                text = blog_mod.render_post(draft, photos, existing)
+                return render_template("publish.html", mode="preview", filename=filename, text=text,
+                                       url=blog_mod.post_url(s, filename, text), log=[])
+            result = blog_mod.publish(cfg, db(), s, dry_run=(action == "dryrun"))
+        except (blog_mod.BlogError, FileExistsError, OSError) as e:
+            flash(str(e), "error")
+            return redirect(url_for("tray"))
+        return render_template("publish.html", mode=action, filename=result.filename, text=result.text,
+                               url=result.url, log=result.log, staged=windows_path(result.staged))
 
     # ---- Decisions ----
 

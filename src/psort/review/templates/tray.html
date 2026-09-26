@@ -3,30 +3,102 @@
 {% block title %}Post tray{% endblock %}
 {% block content %}
 <h1>Post tray</h1>
-{% if photos %}
-  <form method="post" action="{{ url_for('tray_export') }}" class="row export">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input name="post" placeholder="post name, e.g. go dogs go" required>
-    <button class="ok">Export {{ photos|length }} photo{{ "" if photos|length == 1 else "s" }}</button>
-  </form>
-  <p class="muted">Writes upright JPEGs, at most 2048px, with GPS and other location data removed, to
-    <code>{{ outbox }}\&lt;post-name&gt;</code>. Pick them from there in <code>blogupdate.html</code>.
-    Exported photos leave the tray.</p>
+{% if not photos %}
+  <p>Empty. Use "Add to post tray" on any photo, then write the post here.</p>
+{% else %}
   {% set with_people = photos|selectattr("people")|list %}
   {% if with_people %}
     <p class="flash warn">{{ with_people|length }} of these show people ({{ with_people|map(attribute="people")|join("; ") }}).
       Blog posts are public, so check you're happy sharing them.</p>
   {% endif %}
-{% else %}
-  <p>Empty. Use "Add to post tray" on any photo.</p>
+
+  <form method="post" action="{{ url_for('tray_compose') }}" class="composer" id="compose">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if not blog %}
+      <p class="flash warn">To publish straight to the blog, run <code>psort blog-login</code> in a terminal once.
+        You can still write and save the draft, or use "Export only" below.</p>
+    {% endif %}
+    <div class="fields">
+      <label>Post
+        <select name="existing_post">
+          <option value="">New post</option>
+          {% if choices %}{% for p in choices.posts[:60] %}
+            <option value="{{ p.file }}" {% if p.file == draft.existing_post %}selected{% endif %}>Add to: {{ p.title }} ({{ p.file[:10] }})</option>
+          {% endfor %}{% endif %}
+        </select></label>
+      <label>Title <input name="title" value="{{ draft.title }}" placeholder="e.g. Go, Dogs. Go!"></label>
+      <label>Date <input type="date" name="post_date" value="{{ draft.post_date or first_date }}"
+        title="New posts are dated with the first photo's day unless you change it"></label>
+      <label>Author
+        <select name="author">
+          {% for a in (choices.authors if choices else ["steve"]) %}<option {% if a == draft.author %}selected{% endif %}>{{ a }}</option>{% endfor %}
+        </select></label>
+      <label>Categories <input name="categories" value="{{ draft.categories }}" list="categories" placeholder="summer vacation 2026"></label>
+      <label>Tags <input name="tags" value="{{ draft.tags }}" placeholder="2026, summer, vacation"></label>
+    </div>
+    {% if choices %}
+      <datalist id="categories">{% for c in choices.categories %}<option value="{{ c }}">{% endfor %}</datalist>
+      <p class="muted small">Separate several with commas. Used before:
+        {% for t in choices.tags[-15:] %}<code>{{ t }}</code> {% endfor %}</p>
+    {% endif %}
+    <label class="wide">Opening text <textarea name="top_text" rows="3">{{ draft.top_text }}</textarea></label>
+
+    {% for p in photos %}
+      {% set cap = draft.captions.get(p.sha256, {}) %}
+      <div class="post-photo">
+        <img src="{{ url_for('thumb', sha=p.sha256, size=320) }}" alt="">
+        <div class="grow">
+          <label class="wide">Text before photo {{ loop.index }}
+            <textarea name="text_before_{{ p.sha256 }}" rows="2">{{ cap.get("text_before", "") }}</textarea></label>
+          <label class="wide">Alt text (describes the photo) <input name="alt_{{ p.sha256 }}" value="{{ cap.get("alt", "") }}"></label>
+          <div class="row">
+            <span class="name">{{ p.name }}.jpg</span>
+            <button form="move-{{ p.sha256 }}-up" {% if loop.first %}disabled{% endif %}>↑</button>
+            <button form="move-{{ p.sha256 }}-down" {% if loop.last %}disabled{% endif %}>↓</button>
+            <button form="remove-{{ p.sha256 }}">Remove</button>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+
+    <div class="fields">
+      <label>YouTube ID <input name="youtube_id" value="{{ draft.youtube_id }}" placeholder="optional, e.g. -Q3bF4w37Hk"></label>
+    </div>
+    <label class="wide">Closing text <textarea name="bottom_text" rows="3">{{ draft.bottom_text }}</textarea></label>
+    <div class="fields">
+      <label class="grow">Quote <textarea name="quote" rows="3">{{ draft.quote }}</textarea></label>
+      <label>Quote attribution <input name="quote_attribution" value="{{ draft.quote_attribution }}" placeholder="e.g. Dr. Seuss"></label>
+    </div>
+    <div class="row actions">
+      <button name="action" value="save">Save draft</button>
+      <button name="action" value="preview">Preview post</button>
+      <button name="action" value="dryrun" title="Builds the images and post locally; uploads and commits nothing">Dry run</button>
+      <button name="action" value="publish" class="ok"
+        onclick="return confirm('Upload the photos to Turbify and publish this post to the blog now?')">Publish to blog</button>
+    </div>
+  </form>
+  {# Small forms the photo buttons above point at (forms can't be nested). #}
+  {% for p in photos %}
+    {% for dir, step in (("up", -1), ("down", 1)) %}
+      <form method="post" action="{{ url_for('tray_move', sha=p.sha256) }}" id="move-{{ p.sha256 }}-{{ dir }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="step" value="{{ step }}"></form>
+    {% endfor %}
+    <form method="post" action="{{ url_for('tray_toggle', sha=p.sha256) }}" id="remove-{{ p.sha256 }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="/tray"></form>
+  {% endfor %}
+  <p class="muted small">Tip: save the draft before reordering or removing photos, so typed text isn't lost.</p>
+
+  <h2>Export only</h2>
+  <form method="post" action="{{ url_for('tray_export') }}" class="row export">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="post" placeholder="post name, e.g. go dogs go" required>
+    <button>Export {{ photos|length }} photo{{ "" if photos|length == 1 else "s" }} to the outbox</button>
+  </form>
+  <p class="muted">For the old route: writes web-ready JPEGs to <code>{{ outbox }}\&lt;post-name&gt;</code> to upload with
+    <code>blogupdate.html</code>.</p>
 {% endif %}
-<div class="grid">
-{% for p in photos %}
-  <div>{{ card(p) }}{{ post(url_for('tray_toggle', sha=p.sha256), "Remove") }}</div>
-{% endfor %}
-</div>
 {% if posts %}
-  <h2>Recent exports</h2>
+  <h2>Recent posts and exports</h2>
   <ul>{% for x in posts %}<li><code>{{ x.post }}</code>: {{ x.photos }} photos, {{ x.last }} UTC</li>{% endfor %}</ul>
 {% endif %}
 {% endblock %}

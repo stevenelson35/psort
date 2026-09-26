@@ -100,9 +100,23 @@ def toggle_tray(conn: sqlite3.Connection, sha: str) -> bool:
     if conn.execute("DELETE FROM tray WHERE sha256 = ?", (sha,)).rowcount:
         conn.commit()
         return False
-    conn.execute("INSERT INTO tray (sha256) VALUES (?)", (sha,))
+    conn.execute("INSERT INTO tray (sha256, position) VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM tray))",
+                 (sha,))
     conn.commit()
     return True
+
+
+def move_in_tray(conn: sqlite3.Connection, sha: str, step: int) -> None:
+    """Move a photo up (-1) or down (+1) in the post."""
+    order = [r["sha256"] for r in conn.execute("SELECT t.sha256 FROM tray t JOIN photos p ON p.sha256 = t.sha256 "
+                                               "ORDER BY t.position, p.taken_at, p.name")]
+    if sha not in order:
+        raise ActionError("That photo isn't in the post tray.")
+    i = order.index(sha)
+    j = max(0, min(len(order) - 1, i + step))
+    order.insert(j, order.pop(i))
+    conn.executemany("UPDATE tray SET position = ? WHERE sha256 = ?", [(n, s) for n, s in enumerate(order)])
+    conn.commit()
 
 
 def toggle_reviewed(conn: sqlite3.Connection, day: str) -> bool:
