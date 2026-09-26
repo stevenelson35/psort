@@ -105,14 +105,18 @@ def _copy_verified(src: Path, dest: Path, sha: str) -> None:
 
 
 def curate(
-    cfg: Config, conn: sqlite3.Connection, dry_run: bool = False, log: Callable[[str], None] = print
+    cfg: Config, conn: sqlite3.Connection, dry_run: bool = False, log: Callable[[str], None] = print,
+    progress: Callable[[int, int], None] | None = None,
 ) -> CurateStats:
     assign_names(conn)
     stats = CurateStats()
     lib = cfg.library
     current = {r["sha256"]: r for r in conn.execute("SELECT sha256, name, library_path FROM photos")}
 
-    for sha, target in sorted(desired_paths(conn).items(), key=lambda kv: kv[1]):
+    desired = sorted(desired_paths(conn).items(), key=lambda kv: kv[1])
+    for i, (sha, target) in enumerate(desired):
+        if progress:
+            progress(i, len(desired))
         row = current[sha]
         dest = lib / target
         existing = lib / row["library_path"] if row["library_path"] else None

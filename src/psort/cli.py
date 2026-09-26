@@ -17,9 +17,11 @@ from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
 from .dates import UNCERTAIN, sql_in
 from .db import connect
 from .export import ExportError, export
+from . import ingest as ingest_mod
 from .ingest import ingest
 from .library import curate, verify, write_manifest
 from .moments import cluster, score
+from .progress import Progress, Stage
 from .winpath import windows_path
 
 app = typer.Typer(no_args_is_help=True, help="Local photo curation. See DESIGN.md.")
@@ -127,15 +129,50 @@ def curate_cmd(dry_run: Annotated[bool, typer.Option(help="Show what would chang
 
 @app.command()
 def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; show what would change.")] = False) -> None:
-    """Ingest → cluster → score → curate → faces."""
+    """Ingest → group moments → score → arrange library → faces → highlights, with progress."""
     cfg, conn = _open()
-    _ingest(cfg, conn)
-    _cluster(cfg, conn)
-    score(cfg, conn)
-    _curate(cfg, conn, dry_run)
+    if not cfg.inbox.is_dir():
+        typer.secho(f"Inbox not found: {cfg.inbox}", fg="red", err=True)
+        raise typer.Exit(1)
+    files, pending = ingest_mod.plan(cfg, conn)
+    photos = conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0] + pending
+    faces_on = cfg.recognition_model.exists() and cfg.face_model.exists()
+    unscanned = conn.execute("SELECT COUNT(*) FROM photos WHERE faces_scanned = 0").fetchone()[0] + pending
+    # Rough seconds per step, so "overall" and "time left" reflect this run's actual work.
+    stages = [
+        Stage("Scanning inbox", 1 + 0.02 * len(files) + 0.5 * pending),
+        Stage("Grouping moments", 1 + 0.0005 * photos),
+        Stage("Scoring", 0.5 + 0.0003 * photos),
+        Stage("Arranging library", 2 + 0.2 * pending),
+    ]
     if not dry_run:
-        _faces(cfg, conn)
-        _highlights(cfg, conn)
+        stages += [Stage("Finding faces", 0.5 + (0.3 * unscanned if faces_on else 0)), Stage("Updating highlights", 1)]
+    p = Progress(stages)
+
+    p.start(0, f"{len(files):,} files, {pending:,} new or changed")
+    _ingest(cfg, conn, p, files)
+    p.finish(0)
+    p.start(1)
+    _cluster(cfg, conn, p)
+    p.finish(1)
+    p.start(2)
+    score(cfg, conn)
+    close = conn.execute("SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1").fetchone()[0]
+    p.finish(2, f"{close:,} close call(s)")
+    p.start(3)
+    _curate(cfg, conn, dry_run, p)
+    p.finish(3)
+    if not dry_run:
+        todo = conn.execute("SELECT COUNT(*) FROM photos WHERE faces_scanned = 0 AND library_path IS NOT NULL"
+                            ).fetchone()[0]
+        p.set_weight(4, 0.5 + (0.3 * todo if faces_on else 0))  # now we know exactly
+        p.start(4, f"{todo:,} photos to scan" if faces_on else "")
+        _faces(cfg, conn, p)
+        p.finish(4)
+        p.start(5)
+        _highlights(cfg, conn, p)
+        p.finish(5)
+    p.done()
 
 
 @app.command()
@@ -434,69 +471,73 @@ def verify_cmd(
     typer.secho(f"All {len(results)} files are copied (or are OS cache files). {what} is safe to delete.", fg="green")
 
 
-def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
+def _say(p: "Progress | None"):
+    return p.echo if p else typer.echo
+
+
+def _ingest(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None, files=None) -> None:
+    say = _say(p)
     try:
-        s = ingest(cfg, conn, log=typer.echo)
+        s = ingest(cfg, conn, log=say, files=files,
+                   progress=(lambda d, t: p.update(d, t, "files")) if p else None)
     except FileNotFoundError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from e
-    typer.echo(
+    say(
         f"Ingest: {s.new_photos} new, {s.duplicates} exact duplicates, {s.unchanged} unchanged, "
         f"{s.others} other files, {s.errors} unreadable"
         + (f", {s.deleted} you deleted before (not copied)" if s.deleted else "")
     )
     if s.arriving:
-        typer.secho(f"{s.arriving} file(s) still arriving (changed in the last {cfg.settle_seconds:.0f}s): "
-                    "left for the next run.", fg="yellow")
+        say(typer.style(f"{s.arriving} file(s) still arriving (changed in the last {cfg.settle_seconds:.0f}s): "
+                        "left for the next run.", fg="yellow"))
     if s.recovered:
-        typer.echo(f"{s.recovered} previously unreadable file(s) read fine now and moved out of unsorted_files.")
+        say(f"{s.recovered} previously unreadable file(s) read fine now and moved out of unsorted_files.")
     if s.replaced:
-        typer.echo(f"{s.replaced} file(s) changed since last seen (e.g. a copy finished): old copies cleaned up.")
+        say(f"{s.replaced} file(s) changed since last seen (e.g. a copy finished): old copies cleaned up.")
     if s.redated:
-        typer.echo(f"Dated {s.redated} earlier undated photo(s) from their folder names")
+        say(f"Dated {s.redated} earlier undated photo(s) from their folder names")
     if s.rich_packages:
-        typer.echo(f"Rich Capture: {s.rich_packages} package(s), {s.rich_frames} frame(s) added as photos")
+        say(f"Rich Capture: {s.rich_packages} package(s), {s.rich_frames} frame(s) added as photos")
     if s.new_videos or s.live_clips:
-        typer.echo(f"Videos: {s.new_videos} new, {s.live_clips} Live Photo clip(s) kept beside their photos")
+        say(f"Videos: {s.new_videos} new, {s.live_clips} Live Photo clip(s) kept beside their photos")
 
 
-def _cluster(cfg: Config, conn: sqlite3.Connection) -> None:
+def _cluster(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None) -> None:
     moments = cluster(cfg, conn)
     copies = conn.execute("SELECT COUNT(*) FROM photos WHERE duplicate_of IS NOT NULL").fetchone()[0]
-    typer.echo(f"Moments: {moments} ({copies} visual duplicates set aside in _duplicates)")
+    _say(p)(f"Moments: {moments} ({copies} visual duplicates set aside in _duplicates)")
 
 
-def _highlights(cfg: Config, conn: sqlite3.Connection) -> None:
-    s = highlights_mod.sync(cfg, conn, log=typer.echo)
+def _highlights(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None) -> None:
+    s = highlights_mod.sync(cfg, conn, log=_say(p))
     if s.written or s.moved or s.removed:
-        typer.echo(f"Highlights: {s.written} written, {s.moved} moved, {s.removed} removed → {cfg.highlights}")
+        _say(p)(f"Highlights: {s.written} written, {s.moved} moved, {s.removed} removed → {cfg.highlights}")
 
 
-def _faces(cfg: Config, conn: sqlite3.Connection) -> None:
-    scanned = faces_mod.scan(cfg, conn, log=typer.echo)
+def _faces(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None) -> None:
+    scanned = faces_mod.scan(cfg, conn, log=_say(p), progress=(lambda d, t: p.update(d, t, "photos")) if p else None)
     if scanned is None:
-        typer.echo("Faces: recognition model not downloaded (run `psort fetch-models`).")
+        _say(p)("Faces: recognition model not downloaded (run `psort fetch-models`).")
         return
     faces_mod.assign(cfg, conn)
-    typer.echo(f"Faces: scanned {scanned} new photos")
+    _say(p)(f"Faces: scanned {scanned} new photos")
     write_manifest(cfg, conn)
 
 
-def _curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool) -> None:
-    s = curate(cfg, conn, dry_run=dry_run, log=typer.echo)
+def _curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool, p: "Progress | None" = None) -> None:
+    say = _say(p)
+    s = curate(cfg, conn, dry_run=dry_run, log=say, progress=(lambda d, t: p.update(d, t, "photos")) if p else None)
     prefix = "Would curate" if dry_run else "Curate"
-    typer.echo(f"{prefix}: {s.copied} copied, {s.moved} moved, {s.unchanged} unchanged")
+    say(f"{prefix}: {s.copied} copied, {s.moved} moved, {s.unchanged} unchanged")
     if s.videos_copied or s.videos_moved:
-        typer.echo(f"{prefix} videos: {s.videos_copied} copied, {s.videos_moved} moved → {cfg.videos}")
+        say(f"{prefix} videos: {s.videos_copied} copied, {s.videos_moved} moved → {cfg.videos}")
     if s.clips_copied:
-        typer.echo(f"{prefix} Live Photo clips: {s.clips_copied} copied beside their photos")
+        say(f"{prefix} Live Photo clips / Rich Capture packages: {s.clips_copied} copied beside their photos")
     if s.others_copied:
-        typer.echo(f"{prefix} other files: {s.others_copied} copied → {cfg.unsorted}")
+        say(f"{prefix} other files: {s.others_copied} copied → {cfg.unsorted}")
     if s.missing:
-        typer.secho(
-            f"{len(s.missing)} photos have no library copy and their inbox files are gone: "
-            + ", ".join(s.missing[:10]),
-            fg="red",
-        )
+        say(typer.style(f"{len(s.missing)} photos have no library copy and their inbox files are gone: "
+                        + ", ".join(s.missing[:10]), fg="red"))
     if not dry_run:
         write_manifest(cfg, conn)

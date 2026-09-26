@@ -145,7 +145,27 @@ def kind_of(path: Path) -> str:
     return "other"
 
 
-def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = print) -> IngestStats:
+def _unchanged(known, st, path: Path) -> bool:
+    """Already recorded and nothing to redo for this file."""
+    return bool(
+        known and known["size"] == st.st_size and known["mtime"] == st.st_mtime
+        and (known["sha256"] is not None or known["status"] == "junk")
+        and known["status"] != "error"  # unreadable last time: try again (psort may have improved)
+        and not (known["status"] == "other" and kind_of(path) == "rich")  # handled as a package now
+    )
+
+
+def plan(cfg: Config, conn: sqlite3.Connection) -> tuple[list[tuple[Path, Path]], int]:
+    """(every inbox file, how many need processing), for progress estimates."""
+    files = list(inbox_files(cfg.inbox))
+    known = {r["path"]: r for r in conn.execute("SELECT path, size, mtime, status, sha256 FROM sources")}
+    pending = sum(1 for path, rel in files if not _unchanged(known.get(str(rel)), path.stat(), path))
+    return files, pending
+
+
+def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = print,
+           progress: Callable[[int, int], None] | None = None,
+           files: list[tuple[Path, Path]] | None = None) -> IngestStats:
     """Record every inbox file. Every file except OS caches ends up copied somewhere: photos to
     the library, videos to videos/, Live Photo clips beside their photo, the rest to unsorted_files/."""
     if not cfg.inbox.is_dir():
@@ -154,14 +174,14 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
     stats = IngestStats()
     siblings: dict[Path, dict[str, str]] = {}  # folder → {lowercase name: real name}, for Live Photo pairing
 
-    for n, (path, rel) in enumerate(inbox_files(cfg.inbox), start=1):
+    files = files if files is not None else list(inbox_files(cfg.inbox))
+    for n, (path, rel) in enumerate(files, start=1):
+        if progress:
+            progress(n - 1, len(files))
         st = path.stat()
         known = conn.execute("SELECT size, mtime, status, sha256 FROM sources WHERE path = ?", (str(rel),)).fetchone()
         # Unchanged files are skipped, except ones recorded without a copy by an earlier version.
-        if (known and known["size"] == st.st_size and known["mtime"] == st.st_mtime
-                and (known["sha256"] is not None or known["status"] == "junk")
-                and known["status"] != "error"  # unreadable last time: try again (psort may have improved)
-                and not (known["status"] == "other" and kind_of(path) == "rich")):  # handled as a package now
+        if _unchanged(known, st, path):
             stats.unchanged += 1
             continue
 
@@ -219,7 +239,8 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
 
         if n % 100 == 0:
             conn.commit()
-            log(f"  …{n} files scanned")
+            if not progress:
+                log(f"  …{n} files scanned")
 
     conn.commit()
     stats.redated = redate_from_folders(conn)

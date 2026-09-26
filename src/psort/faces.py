@@ -41,7 +41,8 @@ class Recognizer:
         return vec / (np.linalg.norm(vec) or 1.0)
 
 
-def scan(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = print) -> int | None:
+def scan(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = print,
+         progress: Callable[[int, int], None] | None = None) -> int | None:
     """Detect and embed faces in library photos not yet scanned. None if the models are missing."""
     rec = Recognizer.load(cfg)
     if rec is None:
@@ -50,6 +51,8 @@ def scan(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = pri
         "SELECT sha256, library_path FROM photos WHERE faces_scanned = 0 AND library_path IS NOT NULL"
     ).fetchall()
     for n, photo in enumerate(todo, start=1):
+        if progress:
+            progress(n - 1, len(todo))
         path = cfg.library / photo["library_path"]
         if path.exists():
             small, _, _, _ = load_small(path)
@@ -66,7 +69,8 @@ def scan(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = pri
             conn.execute("UPDATE photos SET faces_scanned = 1 WHERE sha256 = ?", (photo["sha256"],))
         if n % 50 == 0:
             conn.commit()
-            log(f"  …{n}/{len(todo)} photos scanned for faces")
+            if not progress:
+                log(f"  …{n}/{len(todo)} photos scanned for faces")
     conn.commit()
     return len(todo)
 
