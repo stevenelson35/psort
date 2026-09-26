@@ -4,7 +4,7 @@ rearranges the library to match."""
 import sqlite3
 from datetime import date, datetime, time
 
-from . import highlights
+from . import highlights, trash
 from .config import Config
 from .library import assign_names, curate, write_manifest
 from .moments import cluster, score
@@ -142,3 +142,27 @@ def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
     highlights.sync(cfg, conn)
     write_manifest(cfg, conn)
     return now
+
+
+def delete_photos(cfg: Config, conn: sqlite3.Connection, shas: list[str]) -> int:
+    """Move photos to library/_trash (restorable); they're never copied back from the inbox."""
+    try:
+        n = trash.delete(cfg, conn, shas)
+    except trash.TrashError as e:
+        raise ActionError(str(e)) from e
+    refresh(cfg, conn, recluster=True)  # another shot may become the best
+    return n
+
+
+def restore_photo(cfg: Config, conn: sqlite3.Connection, sha: str) -> None:
+    try:
+        trash.restore(cfg, conn, sha)
+    except trash.TrashError as e:
+        raise ActionError(str(e)) from e
+    refresh(cfg, conn, recluster=True)
+
+
+def empty_trash(cfg: Config, conn: sqlite3.Connection) -> int:
+    n = trash.empty(cfg, conn)
+    write_manifest(cfg, conn)
+    return n

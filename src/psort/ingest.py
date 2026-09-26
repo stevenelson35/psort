@@ -34,6 +34,7 @@ class IngestStats:
     live_clips: int = 0  # iPhone Live Photo clips, kept beside their photo
     others: int = 0  # everything else, kept in unsorted_files
     junk: int = 0  # OS caches like Thumbs.db: not copied
+    deleted: int = 0  # photos you deleted in psort, seen again in the inbox
 
 
 def batch_of(rel: Path) -> str:
@@ -192,6 +193,8 @@ def _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats) -> None:
     sha = sha256_file(path)
     if conn.execute("SELECT 1 FROM photos WHERE sha256 = ?", (sha,)).fetchone():
         stats.duplicates += 1
+    elif conn.execute("SELECT 1 FROM deleted_photos WHERE sha256 = ?", (sha,)).fetchone():
+        stats.deleted += 1  # you deleted it: never copied back
     else:
         a = analyze(path, detector)
         taken, source = _taken_at(path, rel, a.exif_datetime, st.st_mtime)

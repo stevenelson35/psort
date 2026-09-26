@@ -218,6 +218,24 @@ psort-library/
   - a copy deleted by accident is rewritten on the next `psort run`
 - psort only touches files it wrote there. Anything else you put in `highlights/` is left alone.
 
+### 5.10 Deleting photos
+
+- **How to delete:**
+  - **🗑 Delete** on a photo's details page, or tick photos on a day page and click **Delete ticked**.
+  - The photo and its Live Photo clip move to `library/_trash/<same path>`, and the photo disappears from every view, pick, favorite and tray.
+  - If you delete a moment's best shot, the next best takes its place.
+- **Deleted photos stay deleted:** psort remembers each one, so its inbox copy is **never copied back**. `verify` counts it as safe to delete ("you deleted this photo").
+- **Trash page:** **Restore** puts a photo back in its folder, with faces re-found on the next run. **Empty trash**, or `psort empty-trash`, deletes the files for good. psort still remembers them.
+
+### 5.11 Reconcile
+
+`psort reconcile` catches up with changes made by hand in the library, `videos/` or `unsorted_files/`. It only reports unless you add `--apply`:
+- **Moved or renamed files** (including whole renamed folders) are found by their contents and adopted. psort then files them back in its usual place, **without re-copying** from the inbox and without making duplicates.
+- **Photos whose files are gone everywhere** are listed. With `--apply` they're recorded as deleted for good, so they're never copied back.
+- **Files psort didn't put there** are listed and never touched.
+
+To change *where* something lives, use psort: best pick, events or dates. Its layout always follows those.
+
 ## 6. Review UI
 
 - **`psort review`** starts a local Flask app at `http://localhost:5000`. It listens on 127.0.0.1 only and has no login. It refuses requests whose Host isn't `localhost`/`127.0.0.1`, and every change needs a token that's created fresh each time the app starts. Together these stop a web page elsewhere from driving it.
@@ -313,6 +331,9 @@ The old route (Export only → outbox → `blogupdate.html`) still works.
 | `psort events` / `events name` / `events unname` | Suggested events, and naming them (§5.6) |
 | `psort faces list` / `crops` / `label` / `unlabel` / `scan` | Face groups and people (§5.7) |
 | `psort fetch-models` | Downloads the face models if they're missing |
+| `psort reconcile [--apply]` | Catches up with files moved, renamed or deleted by hand (§5.11) |
+| `psort empty-trash` | Permanently deletes trashed photos (§5.10) |
+| `psort blog-login` | Tests and saves the Turbify FTP login for publishing (§8) |
 | `psort review` | Starts the review UI |
 | `psort export <slug> [files…]` | Exports for a post (§7) |
 | `psort rebuild-state` | Rebuilds the database from `library/.psort/manifest.json` |

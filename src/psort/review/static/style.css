@@ -91,3 +91,5 @@ button.star.on { color: var(--warn); }
 .small { font-size: .8rem; }
 pre.post-text { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .8rem;
   white-space: pre-wrap; font-size: .85rem; }
+button.danger { border-color: var(--error); color: var(--error); }
+button.danger:hover { background: var(--error-bg); }

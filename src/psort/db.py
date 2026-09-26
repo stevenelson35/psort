@@ -108,6 +108,20 @@ CREATE TABLE IF NOT EXISTS tags (
     PRIMARY KEY (sha256, tag)
 );
 
+-- Photos you deleted. Kept out of `photos` so nothing else sees them; remembered so the inbox copy
+-- is never copied back. trash_path is set while the file is in library/_trash (restorable);
+-- purged means the trash was emptied (or the file was deleted by hand) and it's gone for good.
+CREATE TABLE IF NOT EXISTS deleted_photos (
+    sha256      TEXT PRIMARY KEY,
+    name        TEXT,
+    ext         TEXT,
+    taken_at    TEXT,
+    data        TEXT NOT NULL,             -- the photo's row as JSON, for restoring
+    trash_path  TEXT,                      -- relative to the library root
+    purged      INTEGER NOT NULL DEFAULT 0,
+    deleted_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Your favorites: the best of the best.
 CREATE TABLE IF NOT EXISTS favorites (
     sha256    TEXT PRIMARY KEY REFERENCES photos(sha256),

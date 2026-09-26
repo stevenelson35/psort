@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post %}
+{% block title %}Trash{% endblock %}
+{% block content %}
+<h1>🗑 Trash</h1>
+<p class="muted">Deleted photos wait in <code>{{ trash }}</code> until you empty the trash. Either way, psort remembers
+  them and never copies them back from the inbox.{% if gone %} {{ gone }} photo(s) have been deleted for good.{% endif %}</p>
+{% if photos %}
+  <form method="post" action="{{ url_for('trash_empty') }}" class="row"
+        onsubmit="return confirm('Permanently delete {{ photos|length }} photo(s)? This can\'t be undone.')">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="danger">Empty trash ({{ photos|length }})</button>
+  </form>
+  <div class="grid">
+  {% for p in photos %}
+    <figure class="card">
+      <img src="{{ url_for('trash_thumb', sha=p.sha256) }}" loading="lazy" alt="{{ p.name }}">
+      <figcaption>
+        <span class="name">{{ p.name }}</span> <span class="muted">deleted {{ p.deleted_at }} UTC</span>
+        {{ post(url_for('trash_restore', sha=p.sha256), "Restore") }}
+      </figcaption>
+    </figure>
+  {% endfor %}
+  </div>
+{% else %}
+  <p>The trash is empty.</p>
+{% endif %}
+{% endblock %}

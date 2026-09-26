@@ -68,6 +68,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
                 "undated": one(f"SELECT COUNT(*) FROM photos WHERE date_source IN {sql_in(UNCERTAIN)}"),
                 "tray": one("SELECT COUNT(*) FROM tray"),
                 "favorites": one("SELECT COUNT(*) FROM favorites"),
+                "trash": one("SELECT COUNT(*) FROM deleted_photos WHERE purged = 0"),
                 "videos": one("SELECT COUNT(*) FROM videos WHERE library_path IS NOT NULL"),
                 "unnamed_groups": one("SELECT COUNT(DISTINCT cluster) FROM faces WHERE cluster IS NOT NULL"),
             },
@@ -262,6 +263,36 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     def auto(moment_id):
         return act(actions.clear_pick, cfg, db(), moment_id)
 
+    @app.post("/photos/delete")
+    def delete_photos():
+        def run():
+            n = actions.delete_photos(cfg, db(), request.form.getlist("photo"))
+            flash(f"Moved {n} photo(s) to the trash. Restore them from the Trash page if that was a mistake.", "ok")
+        return act(run)
+
+    @app.get("/trash")
+    def trash_page():
+        rows = db().execute("SELECT * FROM deleted_photos WHERE purged = 0 ORDER BY deleted_at DESC").fetchall()
+        gone = db().execute("SELECT COUNT(*) FROM deleted_photos WHERE purged = 1").fetchone()[0]
+        return render_template("trash.html", photos=rows, gone=gone, trash=windows_path(cfg.library / "_trash"))
+
+    @app.post("/trash/<sha>/restore")
+    def trash_restore(sha):
+        return act(actions.restore_photo, cfg, db(), sha, default="/trash")
+
+    @app.post("/trash/empty")
+    def trash_empty():
+        def run():
+            flash(f"Deleted {actions.empty_trash(cfg, db())} photo(s) for good.", "ok")
+        return act(run, default="/trash")
+
+    @app.get("/trash/thumb/<sha>.jpg")
+    def trash_thumb(sha):
+        row = db().execute("SELECT trash_path FROM deleted_photos WHERE sha256 = ?", (sha,)).fetchone()
+        if row is None or not row["trash_path"] or not (cfg.library / row["trash_path"]).exists():
+            abort(404)
+        return send_file(_thumbnail(cfg, cfg.library / row["trash_path"], sha, 320), mimetype="image/jpeg")
+
     @app.post("/photo/<sha>/favorite")
     def favorite(sha):
         return act(actions.toggle_favorite, cfg, db(), sha)
@@ -401,17 +432,11 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         row = db().execute("SELECT library_path FROM photos WHERE sha256 = ?", (sha,)).fetchone()
         if row is None or row["library_path"] is None:
             abort(404)
-        out = cfg.state_dir / "thumbs" / f"{sha}_{size}.jpg"  # content-addressed: never stale
-        if not out.exists():
-            src = cfg.library / row["library_path"]
-            if not src.exists():
-                abort(404)
-            with Image.open(src) as im:
-                im.draft("RGB", (size, size))
-                img = ImageOps.exif_transpose(im).convert("RGB")
-            img.thumbnail((size, size), Image.LANCZOS)
-            _save_atomic(img, out)
-        return send_file(out, mimetype="image/jpeg", max_age=86400)
+        out = cfg.state_dir / "thumbs" / f"{sha}_{size}.jpg"
+        if not out.exists() and not (cfg.library / row["library_path"]).exists():
+            abort(404)
+        return send_file(_thumbnail(cfg, cfg.library / row["library_path"], sha, size), mimetype="image/jpeg",
+                         max_age=86400)
 
     @app.get("/clip/<sha>")
     def live_clip(sha):
@@ -503,6 +528,18 @@ def folders(conn: sqlite3.Connection) -> list[dict]:
             "videos": f["videos"],
             "reviewed": day in reviewed,
         })
+    return out
+
+
+def _thumbnail(cfg: Config, src: Path, sha: str, size: int) -> Path:
+    """Cached JPEG thumbnail (HEIC included). Named by content, so it's never stale."""
+    out = cfg.state_dir / "thumbs" / f"{sha}_{size}.jpg"
+    if not out.exists():
+        with Image.open(src) as im:
+            im.draft("RGB", (size, size))
+            img = ImageOps.exif_transpose(im).convert("RGB")
+        img.thumbnail((size, size), Image.LANCZOS)
+        _save_atomic(img, out)
     return out
 
 

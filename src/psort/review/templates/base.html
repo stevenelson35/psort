@@ -25,6 +25,7 @@
     <a href="{{ url_for('videos') }}">Videos{% if counts.videos %} <span class="pill">{{ counts.videos }}</span>{% endif %}</a>
     <a href="{{ url_for('undated') }}">Undated{% if counts.undated %} <span class="pill warn">{{ counts.undated }}</span>{% endif %}</a>
     <a href="{{ url_for('tray') }}">Post tray{% if counts.tray %} <span class="pill ok">{{ counts.tray }}</span>{% endif %}</a>
+    {% if counts.trash %}<a href="{{ url_for('trash_page') }}">🗑 Trash <span class="pill">{{ counts.trash }}</span></a>{% endif %}
     <button type="button" class="theme" onclick="toggleTheme()" title="Switch light/dark">☀ / ☾</button>
   </nav>
   <main>

@@ -29,6 +29,13 @@
       {% elif real|length > 1 and not s.is_best %}{{ post(url_for('best', sha=s.sha256), "Make this the best") }}{% endif %}
       {{ post(url_for('tray_toggle', sha=s.sha256), "Remove from post tray" if s.in_tray else "Add to post tray",
               "ok" if s.in_tray else "") }}
+      <form method="post" action="{{ url_for('delete_photos') }}" class="inline"
+            onsubmit="return confirm('Move {{ s.name }} to the trash?')">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="photo" value="{{ s.sha256 }}">
+        <input type="hidden" name="next" value="{{ request.path if shots|length > 1 else url_for('folder', key=folder_key) }}">
+        <button class="danger">🗑 Delete</button>
+      </form>
       {% if s.live_clip %}
         <details class="live"><summary>◉ Play Live Photo clip</summary>
           <video controls preload="none" src="{{ url_for('live_clip', sha=s.live_clip) }}"></video>

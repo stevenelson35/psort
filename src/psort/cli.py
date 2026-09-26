@@ -176,6 +176,8 @@ def status() -> None:
         "Visual duplicates": "SELECT COUNT(*) FROM photos WHERE duplicate_of IS NOT NULL",
         "Close calls": "SELECT COUNT(DISTINCT moment_id) FROM photos WHERE close_call = 1",
         "Favorites": "SELECT COUNT(*) FROM favorites",
+        "In trash": "SELECT COUNT(*) FROM deleted_photos WHERE purged = 0",
+        "Deleted for good": "SELECT COUNT(*) FROM deleted_photos WHERE purged = 1",
         "Named events": "SELECT COUNT(*) FROM named_events",
         "Named people": "SELECT COUNT(*) FROM people",
         "Faces found": "SELECT COUNT(*) FROM faces",
@@ -230,6 +232,47 @@ def blog_login(
     blog_mod.save_password(password)
     blog_mod.write_settings(_config_path, s)
     typer.echo(f"Saved. Settings are in {_config_path} [blog]; the password is in {blog_mod.SECRETS_PATH} (private).")
+
+
+@app.command("reconcile")
+def reconcile_cmd(apply: Annotated[bool, typer.Option(help="Make the changes (otherwise just report).")] = False) -> None:
+    """Catch up with files you moved, renamed or deleted by hand in the library, videos or unsorted files."""
+    from . import actions
+    from .reconcile import reconcile
+
+    cfg, conn = _open()
+    r = reconcile(cfg, conn, apply=apply)
+    for label, old, new in r.moved:
+        typer.echo(f"  moved   {label}: {old} → {new}")
+    for label, path in r.missing:
+        typer.echo(f"  missing {label}: {path}")
+    if r.unknown:
+        typer.echo(f"  {len(r.unknown)} file(s) psort didn't put there (left alone):")
+        for path in r.unknown[:20]:
+            typer.echo(f"    {path}")
+    if not (r.moved or r.missing):
+        typer.echo("Everything is where psort expects it.")
+        return
+    if not apply:
+        typer.echo(f"\n{len(r.moved)} moved, {len(r.missing)} missing. Run `psort reconcile --apply` to:\n"
+                   "  - adopt moved files (psort then files them back in its usual place, without re-copying)\n"
+                   "  - record missing photos as deleted, so they're never copied back from the inbox")
+        return
+    actions.refresh(cfg, conn, recluster=True)
+    typer.echo(f"Adopted {len(r.moved)} moved file(s); recorded missing photos as deleted. Library is back in order.")
+
+
+@app.command("empty-trash")
+def empty_trash_cmd() -> None:
+    """Permanently delete the photos in library/_trash (psort still won't copy them back)."""
+    from . import actions
+
+    cfg, conn = _open()
+    n = conn.execute("SELECT COUNT(*) FROM deleted_photos WHERE purged = 0").fetchone()[0]
+    if n and typer.confirm(f"Permanently delete {n} photo(s) in the trash?"):
+        typer.echo(f"Deleted {actions.empty_trash(cfg, conn)} photo(s) for good.")
+    elif not n:
+        typer.echo("The trash is empty.")
 
 
 @app.command("highlights")
@@ -398,6 +441,7 @@ def _ingest(cfg: Config, conn: sqlite3.Connection) -> None:
     typer.echo(
         f"Ingest: {s.new_photos} new, {s.duplicates} exact duplicates, {s.unchanged} unchanged, "
         f"{s.others} other files, {s.errors} unreadable"
+        + (f", {s.deleted} you deleted before (not copied)" if s.deleted else "")
     )
     if s.redated:
         typer.echo(f"Dated {s.redated} earlier undated photo(s) from their folder names")

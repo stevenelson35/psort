@@ -279,6 +279,8 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> l
             results.append(VerifyResult(str(rel), False, "changed since it was ingested (run `psort run`)"))
         elif src["status"] == "junk":
             results.append(VerifyResult(str(rel), True, src["reason"]))
+        elif src["status"] == "livephoto" and _photo_deleted(conn, str(rel)):
+            results.append(VerifyResult(str(rel), True, "Live Photo clip of a photo you deleted"))
         elif src["status"] == "livephoto":
             results.append(_placed(conn, cfg.library, "live_clips", src["sha256"], "Live Photo clip beside its photo: ",
                                    rel=str(rel)))
@@ -293,6 +295,9 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> l
                 results.append(VerifyResult(str(rel), False, "video not copied yet (run `psort run`)"))
         elif src["status"] != "image":
             results.append(VerifyResult(str(rel), False, f"not in library: {src['reason']}"))
+        elif deleted := conn.execute("SELECT purged FROM deleted_photos WHERE sha256 = ?", (src["sha256"],)).fetchone():
+            results.append(VerifyResult(str(rel), True, "you deleted this photo" +
+                                        (" (gone for good)" if deleted["purged"] else " (it's in library/_trash)")))
         else:
             photo = conn.execute("SELECT library_path FROM photos WHERE sha256 = ?", (src["sha256"],)).fetchone()
             if photo["library_path"] and (cfg.library / photo["library_path"]).exists():
@@ -300,6 +305,13 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> l
             else:
                 results.append(VerifyResult(str(rel), False, "not copied to the library yet (run `psort run`)"))
     return results
+
+
+def _photo_deleted(conn, clip_rel: str) -> bool:
+    return bool(conn.execute(
+        """SELECT 1 FROM live_clips c JOIN sources s ON s.path = c.photo_path
+           JOIN deleted_photos d ON d.sha256 = s.sha256
+           WHERE c.sha256 = (SELECT sha256 FROM sources WHERE path = ?)""", (clip_rel,)).fetchone())
 
 
 def _placed(conn, root: Path, table: str, sha: str | None, ok_prefix: str, rel: str | None = None) -> "VerifyResult":
@@ -341,6 +353,8 @@ def write_manifest(cfg: Config, conn: sqlite3.Connection) -> Path:
                 "videos": [dict(r) for r in conn.execute("SELECT * FROM videos ORDER BY taken_at, name")],
                 "live_clips": [dict(r) for r in conn.execute("SELECT * FROM live_clips ORDER BY library_path")],
                 "other_files": [dict(r) for r in conn.execute("SELECT * FROM other_files ORDER BY library_path")],
+                "deleted_photos": [{k: r[k] for k in ("sha256", "name", "taken_at", "trash_path", "purged", "deleted_at")}
+                                   for r in conn.execute("SELECT * FROM deleted_photos ORDER BY deleted_at")],
                 "sources": sources,
             },
             indent=1,
