@@ -1,5 +1,6 @@
 """Command-line interface (DESIGN.md §9)."""
 
+import dataclasses
 import os
 import sqlite3
 import urllib.request
@@ -12,6 +13,7 @@ from . import config as config_mod
 from . import events as events_mod
 from . import faces as faces_mod
 from . import blog as blog_mod
+from . import browse as browse_mod
 from . import highlights as highlights_mod
 from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
 from .dates import UNCERTAIN, sql_in
@@ -279,6 +281,28 @@ def blog_login(
     blog_mod.save_password(password)
     blog_mod.write_settings(_config_path, s)
     typer.echo(f"Saved. Settings are in {_config_path} [blog]; the password is in {blog_mod.SECRETS_PATH} (private).")
+
+
+@app.command("publish-browse")
+def publish_browse_cmd(
+    dry_run: Annotated[bool, typer.Option(help="Render and stage files, but don't upload.")] = False,
+    remote_dir: Annotated[str, typer.Option(help="Turbify folder for browse images and the manifest.")] = "pics/browse",
+) -> None:
+    """Publish every favorite (web-size copies + a slim JSON manifest) for the photo browser page."""
+    cfg, conn = _open()
+    try:
+        s = blog_mod.settings(_config_path)
+    except blog_mod.BlogError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    s = dataclasses.replace(s, remote_dir=remote_dir)
+    password = None if dry_run else blog_mod.load_password()
+    try:
+        out = browse_mod.publish(cfg, conn, s, password, dry_run=dry_run, log=typer.echo)
+    except (browse_mod.BrowseError, blog_mod.BlogError) as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    typer.echo(f"Files staged in {out}")
 
 
 @app.command("reconcile")
