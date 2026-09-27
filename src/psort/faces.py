@@ -85,20 +85,22 @@ def _similarities(a: np.ndarray, b: np.ndarray):
 
 
 def assign(cfg: Config, conn: sqlite3.Connection) -> None:
-    rows = conn.execute("SELECT id, embedding, person_id, label_source FROM faces ORDER BY id").fetchall()
+    rows = conn.execute("SELECT id, embedding, person_id, label_source, ignored FROM faces ORDER BY id").fetchall()
     if not rows:
         return
     ids = np.array([r["id"] for r in rows])
     emb = np.stack([np.frombuffer(r["embedding"], np.float32) for r in rows])
     user = np.array([r["label_source"] == "user" for r in rows])
     user_person = np.array([r["person_id"] if r["label_source"] == "user" else -1 for r in rows])
+    ignored = np.array([bool(r["ignored"]) for r in rows])
 
     person = np.where(user, user_person, -1)
     similarity = np.full(len(rows), np.nan)
 
     # Auto-label: each face takes the person whose user-named faces it most resembles, if close
-    # enough, skipping any person you've said it isn't.
-    todo = np.flatnonzero(~user)
+    # enough, skipping any person you've said it isn't. Ignored faces (e.g. a stranger) are never
+    # matched to anyone.
+    todo = np.flatnonzero(~user & ~ignored)
     if user.any() and len(todo):
         named = np.flatnonzero(user)
         persons = np.unique(user_person[named])
@@ -122,7 +124,8 @@ def assign(cfg: Config, conn: sqlite3.Connection) -> None:
 
     # Group the still-unnamed faces: link each to its nearest look-alikes above the cluster
     # threshold (mutual links only), then take connected components. Nearest-k keeps this fast.
-    unknown = np.flatnonzero(person == -1)
+    # Ignored faces are left out, so they never reappear in the unnamed groups to review.
+    unknown = np.flatnonzero((person == -1) & ~ignored)
     cluster = np.full(len(rows), -1)
     if len(unknown):
         k = min(NEIGHBORS, len(unknown))
@@ -147,6 +150,8 @@ def assign(cfg: Config, conn: sqlite3.Connection) -> None:
     for i, r in enumerate(rows):
         if user[i]:
             updates.append((r["person_id"], "user", None, None, r["id"]))
+        elif ignored[i]:
+            updates.append((None, None, None, None, r["id"]))
         elif person[i] != -1:
             updates.append((int(person[i]), "auto", float(similarity[i]), None, r["id"]))
         else:
@@ -209,6 +214,33 @@ def unlabel(cfg: Config, conn: sqlite3.Connection, face_ids: list[int]) -> None:
     conn.execute(f"DELETE FROM people WHERE id IN ({orphans})")
     conn.commit()
     _sync_highlights(cfg, conn)
+
+
+def ignore(cfg: Config, conn: sqlite3.Connection, face_ids: list[int]) -> None:
+    """"Not a person to identify" (e.g. a stranger caught in a shot): the face is dropped from
+    unnamed groups and never auto-matched to anyone, so it won't come up for review again."""
+    _check_faces(conn, face_ids)
+    marks = f"({','.join('?' * len(face_ids))})"
+    conn.execute(
+        f"UPDATE faces SET ignored = 1, person_id = NULL, label_source = NULL, cluster = NULL WHERE id IN {marks}",
+        face_ids,
+    )
+    conn.commit()
+    assign(cfg, conn)
+
+
+def unignore(cfg: Config, conn: sqlite3.Connection, face_ids: list[int]) -> None:
+    """Undo `ignore`: the face is regrouped like any other unnamed face."""
+    _check_faces(conn, face_ids)
+    marks = f"({','.join('?' * len(face_ids))})"
+    conn.execute(f"UPDATE faces SET ignored = 0 WHERE id IN {marks}", face_ids)
+    conn.commit()
+    assign(cfg, conn)
+
+
+def ignored_faces(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Faces you've said aren't worth identifying, most recently ignored first."""
+    return conn.execute("SELECT id FROM faces WHERE ignored = 1 ORDER BY id DESC").fetchall()
 
 
 def _sync_highlights(cfg: Config, conn: sqlite3.Connection) -> None:

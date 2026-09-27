@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post %}
+{% block title %}Ignored faces{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('faces') }}">← Faces</a></p>
+<h1>Ignored faces</h1>
+<p class="muted">Faces you've said aren't worth identifying (e.g. a stranger). They're never grouped or auto-matched.
+  Click "Un-ignore" to put one back into review.</p>
+{% if not faces %}<p>No ignored faces.</p>{% endif %}
+<div class="faces">
+  {% for fid in faces %}
+    <figure class="face-card">
+      {% if moments.get(fid) %}<a href="{{ url_for('moment', moment_id=moments[fid]) }}"><img src="{{ url_for('face_thumb', face_id=fid) }}" loading="lazy" alt="face {{ fid }}"></a>
+      {% else %}<img src="{{ url_for('face_thumb', face_id=fid) }}" loading="lazy" alt="face {{ fid }}">{% endif %}
+      <figcaption>{{ post(url_for('faces_unignore'), "Un-ignore", fields={"face": fid}) }}</figcaption>
+    </figure>
+  {% endfor %}
+</div>
+{% endblock %}

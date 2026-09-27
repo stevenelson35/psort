@@ -2,6 +2,14 @@
 {% block content %}
 <h1>Library</h1>
 <p class="muted">{{ stats.photos }} photos in {{ stats.moments }} moments.</p>
+{% if progress.folders %}
+  <div class="progress-summary">
+    <div class="progress-bar"><div class="progress-fill" style="width: {{ (100 * progress.folders_done / progress.folders)|round(1) }}%"></div></div>
+    <span class="muted">{{ progress.folders_done }} / {{ progress.folders }} days reviewed
+      ({{ (100 * progress.folders_done / progress.folders)|round }}%) ·
+      {{ progress.photos_done }} / {{ progress.photos }} photos</span>
+  </div>
+{% endif %}
 {% if not by_year %}<p>Nothing curated yet. Run <code>psort run</code>.</p>{% endif %}
 {% for year, folders in by_year.items() %}
   <h2>{{ year }}</h2>

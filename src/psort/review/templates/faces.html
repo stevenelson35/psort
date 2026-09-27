@@ -15,7 +15,9 @@
 <h2>Unnamed groups</h2>
 <p class="muted">Look-alike faces psort grouped together, most typical first. <strong>Name ticked only</strong> names just
   the faces you ticked (unticked ones are remembered as "not this person"); similar faces elsewhere may then be matched
-  automatically, shown as "auto" on the person's page. For big groups, use <strong>See all</strong> to check every face first.</p>
+  automatically, shown as "auto" on the person's page. For big groups, use <strong>See all</strong> to check every face first.
+  Not a person you want tracked, like a stranger in the background? Tick their face(s) and <strong>Ignore ticked</strong> —
+  they won't be grouped or shown again. <a href="{{ url_for('faces_ignored') }}">See ignored faces</a>.</p>
 {% if not groups %}<p>No unnamed faces{% if not people %} yet. Faces are found during <code>psort run</code>{% endif %}.</p>{% endif %}
 {% for g in groups %}
   <form method="post" action="{{ url_for('faces_label') }}" class="group">
@@ -35,6 +37,8 @@
         <button name="group" value="{{ g.cluster }}" title="Names every face in the group except unticked ones">Name whole group</button>
       {% endif %}
       <button title="Names only the ticked faces; unticked ones are marked 'not this person'">Name ticked only</button>
+      <button type="submit" formaction="{{ url_for('faces_ignore') }}" formnovalidate
+              title="Not a person to identify (e.g. a stranger): ticked faces are dropped from review for good">Ignore ticked</button>
       {% if g.faces > samples[g.cluster]|length %}
         <a href="{{ url_for('face_group', cluster=g.cluster) }}">See all {{ g.faces }} faces →</a>
       {% endif %}

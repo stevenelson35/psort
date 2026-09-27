@@ -14,6 +14,8 @@
   <div class="row sticky-bar">
     <input name="name" list="people" placeholder="Who is this?" required>
     <button class="ok">Name ticked faces</button>
+    <button type="submit" formaction="{{ url_for('faces_ignore') }}" formnovalidate
+            title="Not a person to identify (e.g. a stranger): ticked faces are dropped from review for good">Ignore ticked</button>
     <button type="button" onclick="document.querySelectorAll('input[name=face]').forEach(c => c.checked = true); count()">Tick all</button>
     <button type="button" onclick="document.querySelectorAll('input[name=face]').forEach(c => c.checked = false); count()">Untick all</button>
     <span class="muted" id="ticked">0 ticked</span>

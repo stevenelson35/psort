@@ -179,6 +179,7 @@ a_library/
   - **"Name ticked only" on the Faces page** records the unticked *shown* faces as rejections.
   - Faces above `match_threshold` (0.45) similarity to a named person get that name automatically (`auto`). Those are listed first, least certain first, on the person's page.
   - Unticked faces and "Not <name>" are stored as **rejections**, so they're never auto-matched to that person again.
+  - **Ignore:** "Ignore ticked" (Faces page or a group page) marks faces `ignored` — not a person to identify, e.g. a stranger caught in a shot. Ignored faces are dropped from grouping and auto-matching entirely, so they never come up again. **See ignored faces** lists them, each with an **Un-ignore** to put one back into review.
 - **Privacy:** embeddings stay **only** in the WSL database. The manifest and highlight copies carry only people's names.
 - **Uses:** "who's in this photo," the Favorites person filter, Windows Tags on highlights, and the post tray's "these show people" warning.
 - Pets' faces are often detected too.
@@ -232,8 +233,9 @@ a_library/
 
 - **`psort review`** starts Flask on **127.0.0.1:5000**, with no login. Requests whose Host isn't localhost are refused, and every change needs a per-launch token (a Jinja global, so imported macros see it). Dark mode is the default, with a light toggle remembered per browser.
 - **Pages:**
-  - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed.
+  - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed, plus an overall **progress bar** (days and photos reviewed vs. the whole library).
   - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked**, 🎬 videos, and **Mark day reviewed**.
+  - **Reviewed days un-mark themselves:** if `psort run` copies a genuinely new photo (not a re-copy) into a day already marked reviewed, that day's `reviewed` row is dropped, so it shows as to-do again.
   - **Moment:** every shot with its score breakdown:
     - **Make this the best** / let psort pick again
     - ☆, tray, tags, fix date, 🗑 delete
@@ -293,7 +295,7 @@ Run with `uv run psort …` from the repo.
 | `review [--port]` | Review UI |
 | `close-calls` | Lists near-tie moments |
 | `events` · `events name <id> <name> [--through <id>]` · `events unname <name>` | Events (§5.6) |
-| `faces list` · `crops` · `label <name> --group/--face` · `unlabel --face` · `scan` | Faces from the command line (§5.7) |
+| `faces list` · `crops` · `label <name> --group/--face` · `unlabel --face` · `ignore --face` · `unignore --face` · `scan` | Faces from the command line (§5.7) |
 | `highlights` | Syncs `highlights/` (also part of `run`) |
 | `export <post> [names…] [--keep-tray]` | Export only (§7) |
 | `blog-login` | Saves and tests the FTPS login (§8) |
@@ -334,6 +336,7 @@ Run with `uv run psort …` from the repo.
 - **The first large run** found 1 unreadable Windows Phone photo, since fixed; it's retried automatically. It also filed 667 `.nar` files as "other"; the next `psort run` upgrades them to Rich Capture (§5.12).
 - **Blog publishing** is built, but **`psort blog-login` hasn't been run with the real password yet**, so nothing has been published to the live blog through psort. Suggest a Dry run first.
 - **The user's review work** (closes, faces, events, undated) is ongoing. There are 15 Disney photos dated only to "April 2016."
+- **2026-09-27:** added ignoring faces (§5.7), auto-un-review of days when new photos land in them, and a library-wide review progress bar (§6).
 
 ### Backlog and ideas (not built)
 - **People filter** on day pages and in search, beyond Favorites. Optionally, favor shots where family faces are sharp.
@@ -378,7 +381,7 @@ Run with `uv run psort …` from the repo.
   - `videos`, `live_clips` (with `photo_path`), `rich_packages` (with `photo_path`), `derived_frames` (frames unpacked from packages), `other_files`
   - each has a `library_path` relative to its root
 - **Review state:**
-  - `named_events`, `people`, `faces` (embedding BLOB, `person_id`, `label_source`, `cluster`), `face_rejections`
+  - `named_events`, `people`, `faces` (embedding BLOB, `person_id`, `label_source`, `cluster`, `ignored`), `face_rejections`
   - `tags`, `favorites`, `highlights` (the files psort wrote), `tray` (with `position`), `post_draft`, `exports`, `reviewed`
   - `deleted_photos` (with `trash_path`, `purged`, and the full row as JSON)
 

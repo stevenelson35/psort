@@ -7,7 +7,7 @@ import pytest
 
 from psort.config import Config
 from psort.db import SCHEMA, connect
-from psort.faces import FaceError, assign, label, summary, unlabel
+from psort.faces import FaceError, assign, ignore, ignored_faces, label, summary, unignore, unlabel
 
 
 @pytest.fixture
@@ -127,6 +127,41 @@ def test_label_errors(conn, cfg):
         label(cfg, conn, "Alice", face_ids=[99999])
     with pytest.raises(FaceError):
         label(cfg, conn, "   ", face_ids=[1])
+
+
+def test_ignore_drops_faces_from_groups_and_matching(conn, cfg):
+    truth = add_faces(conn, {"a": 4, "stranger": 2})
+    assign(cfg, conn)
+    stranger_ids = sorted(i for i, p in truth.items() if p == "stranger")
+
+    ignore(cfg, conn, stranger_ids)
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM faces")}
+    for i in stranger_ids:
+        assert rows[i]["ignored"] == 1
+        assert rows[i]["cluster"] is None
+        assert rows[i]["person_id"] is None
+    # Not counted as an unnamed group any more.
+    _, groups = summary(conn)
+    assert all(g["cluster"] not in stranger_ids for g in groups)
+    assert {r["id"] for r in ignored_faces(conn)} == set(stranger_ids)
+
+    # Naming the real person doesn't pull the ignored faces in as auto-matches.
+    label(cfg, conn, "Alice", face_ids=[i for i, p in truth.items() if p == "a"][:1])
+    for i in stranger_ids:
+        assert conn.execute("SELECT person_id FROM faces WHERE id = ?", (i,)).fetchone()["person_id"] is None
+
+    # Un-ignoring puts it back into an unnamed group.
+    unignore(cfg, conn, stranger_ids)
+    row = conn.execute("SELECT ignored, cluster FROM faces WHERE id = ?", (stranger_ids[0],)).fetchone()
+    assert row["ignored"] == 0
+    assert row["cluster"] is not None
+
+
+def test_ignore_unknown_face_errors(conn, cfg):
+    add_faces(conn, {"a": 1})
+    assign(cfg, conn)
+    with pytest.raises(FaceError):
+        ignore(cfg, conn, [99999])
 
 
 def test_old_database_is_upgraded(tmp_path):

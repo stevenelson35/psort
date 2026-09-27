@@ -104,6 +104,15 @@ def _copy_verified(src: Path, dest: Path, sha: str) -> None:
     os.replace(partial, dest)
 
 
+def _day_of(target: str) -> str | None:
+    """The 'YYYY-MM-DD' day a library-relative path's folder belongs to, or None when the day
+    isn't known (undated, or only the month is known)."""
+    parts = target.split("/")
+    if parts[0] == UNDATED_DIR or len(parts) < 2 or parts[1].endswith(f"_{UNKNOWN_DAY}"):
+        return None
+    return parts[1][:10]
+
+
 def curate(
     cfg: Config, conn: sqlite3.Connection, dry_run: bool = False, log: Callable[[str], None] = print,
     progress: Callable[[int, int], None] | None = None, check_files: bool = True,
@@ -115,6 +124,7 @@ def curate(
     stats = CurateStats()
     lib = cfg.library
     current = {r["sha256"]: r for r in conn.execute("SELECT sha256, name, library_path FROM photos")}
+    new_days: set[str] = set()  # days a brand-new photo landed in, so a "reviewed" mark is undone
 
     desired = sorted(desired_paths(conn).items(), key=lambda kv: kv[1])
     for i, (sha, target) in enumerate(desired):
@@ -154,11 +164,19 @@ def curate(
                 log(f"  copy {src.relative_to(cfg.inbox)} → {target}")
             else:
                 _copy_verified(src, dest, sha)
+                if row["library_path"] is None:  # a brand-new photo, not just a re-copy
+                    if day := _day_of(target):
+                        new_days.add(day)
             stats.copied += 1
 
         if not dry_run:
             conn.execute("UPDATE photos SET library_path = ? WHERE sha256 = ?", (target, sha))
             conn.commit()
+
+    if new_days:
+        # New photos landed in a day you'd already reviewed; it's due for another look.
+        conn.executemany("DELETE FROM reviewed WHERE day = ?", [(d,) for d in new_days])
+        conn.commit()
 
     # Videos follow the same folder names in their own tree, so an event rename moves both.
     from . import videos as videos_mod

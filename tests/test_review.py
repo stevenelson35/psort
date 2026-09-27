@@ -160,6 +160,36 @@ def test_name_faces(ui, tmp_path):
     ui.post_ok("/faces/unlabel", face="1")
     assert conn.execute("SELECT COUNT(*) FROM people").fetchone()[0] == 0
 
+    # The stranger (face 3) is dropped from review for good, and stays that way after re-assigning.
+    ui.post_ok("/faces/ignore", face="3")
+    assert conn.execute("SELECT cluster, ignored FROM faces WHERE id = 3").fetchone()[:] == (None, 1)
+    assert "Group 3" not in text(ui.get("/faces"))
+    ignored_page = text(ui.get("/faces/ignored"))
+    assert "Un-ignore" in ignored_page
+
+    ui.post_ok("/faces/unignore", face="3")
+    assert conn.execute("SELECT ignored FROM faces WHERE id = 3").fetchone()["ignored"] == 0
+    assert "No ignored faces" in text(ui.get("/faces/ignored"))
+
+
+def test_reviewed_day_resets_when_a_new_photo_arrives(ui, psort, sample_inbox):
+    ui.post_ok("/day/2026-07-03/reviewed")
+    assert "✓ Reviewed" in text(ui.get("/folder/2026/2026-07-03"))
+
+    from conftest import save, scene
+    save(sample_inbox / "late/IMG_9999.jpg", scene(320), "2026:07:03 18:30:00")
+    psort("run")
+
+    assert "Mark day reviewed" in text(ui.get("/folder/2026/2026-07-03"))  # back to to-do
+
+
+def test_library_progress_summary(ui, tmp_path):
+    home = text(ui.get("/"))
+    assert "0 / " in home and "days reviewed" in home
+    ui.post_ok("/day/2026-07-03/reviewed")
+    home = text(ui.get("/"))
+    assert "1 / " in home and "days reviewed" in home
+
 
 # ---- Submitting the forms the pages actually render (not hand-built requests) ----
 

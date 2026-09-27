@@ -438,6 +438,9 @@ def faces_list() -> None:
         typer.echo(f"  group {c['cluster']:<6} {c['faces']:5} faces in {c['photos']} photos")
     if clusters:
         typer.echo("See them: psort faces crops   Name one: psort faces label <name> --group <id>")
+    ignored = faces_mod.ignored_faces(conn)
+    if ignored:
+        typer.echo(f"{len(ignored)} face(s) ignored (not worth identifying).")
 
 
 @faces_app.command("crops")
@@ -478,6 +481,22 @@ def faces_unlabel(face: Annotated[list[int], typer.Option(help="Face id. Repeata
     cfg, conn = _open()
     faces_mod.unlabel(cfg, conn, face)
     typer.echo(f"Unlabeled {len(face)} face(s).")
+
+
+@faces_app.command("ignore")
+def faces_ignore(face: Annotated[list[int], typer.Option(help="Face id. Repeatable.")]) -> None:
+    """Mark faces as not worth identifying (e.g. a stranger); they won't be listed again."""
+    cfg, conn = _open()
+    faces_mod.ignore(cfg, conn, face)
+    typer.echo(f"Ignored {len(face)} face(s).")
+
+
+@faces_app.command("unignore")
+def faces_unignore(face: Annotated[list[int], typer.Option(help="Face id. Repeatable.")]) -> None:
+    """Undo `faces ignore`."""
+    cfg, conn = _open()
+    faces_mod.unignore(cfg, conn, face)
+    typer.echo(f"Unignored {len(face)} face(s).")
     write_manifest(cfg, conn)
 
 

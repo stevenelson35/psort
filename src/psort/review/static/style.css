@@ -28,6 +28,9 @@ a { color: var(--accent); }
 .pill.warn { background: var(--warn-bg); color: var(--warn); }
 .pill.ok { background: var(--ok-bg); color: var(--ok); }
 .done { color: var(--ok); font-weight: 700; }
+.progress-summary { margin: .5rem 0 1rem; }
+.progress-bar { height: 8px; border-radius: 999px; background: var(--pill); overflow: hidden; margin-bottom: .35rem; }
+.progress-fill { height: 100%; background: var(--ok); border-radius: 999px; }
 .flash { padding: .5rem .8rem; border-radius: 6px; background: var(--ok-bg); color: var(--ok); }
 .flash.error { background: var(--error-bg); color: var(--error); }
 .flash.warn { background: var(--warn-bg); color: var(--warn); }

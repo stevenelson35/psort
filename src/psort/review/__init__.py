@@ -138,12 +138,22 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     @app.get("/")
     def index():
         by_year = defaultdict(list)
-        for f in folders(db()):
+        all_folders = folders(db())
+        for f in all_folders:
             by_year[f["year"]].append(f)
         stats = db().execute(
             "SELECT COUNT(*) AS photos, COUNT(DISTINCT moment_id) AS moments FROM photos WHERE library_path IS NOT NULL"
         ).fetchone()
-        return render_template("index.html", by_year=dict(sorted(by_year.items(), reverse=True)), stats=stats)
+        # Progress across the whole library: reviewable folders are ones with a known day.
+        reviewable = [f for f in all_folders if f["day"]]
+        progress = {
+            "folders": len(reviewable),
+            "folders_done": sum(1 for f in reviewable if f["reviewed"]),
+            "photos": sum(f["photos"] for f in reviewable),
+            "photos_done": sum(f["photos"] for f in reviewable if f["reviewed"]),
+        }
+        return render_template("index.html", by_year=dict(sorted(by_year.items(), reverse=True)), stats=stats,
+                               progress=progress)
 
     @app.get("/folder/<path:key>")
     def folder(key):
@@ -477,6 +487,27 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     @app.post("/faces/unlabel")
     def faces_unlabel():
         return act(faces_mod.unlabel, cfg, db(), [int(i) for i in request.form.getlist("face")], default="/faces")
+
+    @app.post("/faces/ignore")
+    def faces_ignore():
+        ticked = sorted({int(i) for i in request.form.getlist("face")})
+        if not ticked:
+            flash("No faces selected.", "error")
+            return back("/faces")
+        return act(faces_mod.ignore, cfg, db(), ticked, default="/faces")
+
+    @app.get("/faces/ignored")
+    def faces_ignored():
+        ids = [r["id"] for r in faces_mod.ignored_faces(db())]
+        moments = {r["id"]: r["moment_id"] for r in db().execute(
+            f"SELECT f.id, p.moment_id FROM faces f JOIN photos p ON p.sha256 = f.sha256 "
+            f"WHERE f.id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
+        return render_template("ignored.html", faces=ids, moments=moments)
+
+    @app.post("/faces/unignore")
+    def faces_unignore():
+        return act(faces_mod.unignore, cfg, db(), [int(i) for i in request.form.getlist("face")],
+                   default="/faces/ignored")
 
     # ---- Images ----
 

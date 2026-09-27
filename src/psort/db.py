@@ -108,7 +108,8 @@ CREATE TABLE IF NOT EXISTS faces (
     person_id     INTEGER REFERENCES people(id),
     label_source  TEXT,                    -- user | auto
     similarity    REAL,                    -- for auto labels
-    cluster       INTEGER                  -- unnamed-face group: smallest face id in the group
+    cluster       INTEGER,                 -- unnamed-face group: smallest face id in the group
+    ignored       INTEGER NOT NULL DEFAULT 0  -- "not a person to identify" (e.g. a stranger): never grouped or shown again
 );
 
 -- "This face is not that person": auto-matching never re-applies a rejected name.
@@ -190,6 +191,7 @@ _ADDED_COLUMNS = [
     ("photos", "faces_scanned", "INTEGER NOT NULL DEFAULT 0"),
     ("photos", "duplicate_of", "TEXT"),
     ("tray", "position", "INTEGER NOT NULL DEFAULT 0"),
+    ("faces", "ignored", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
