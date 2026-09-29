@@ -75,6 +75,7 @@ input directories ─[1 scan]─► state DB ─[2 group moments]─► ─[3 sc
   ```
 - **Something always shows.** The first line appears immediately ("looking at the inbox…", with a running file count). The spinner is driven by its own timer, so it keeps turning even while psort waits on a slow disk or a big file: a heartbeat that shows it's alive.
 - **When output is redirected,** it prints a line every 10%, plus "… still working on <step> (elapsed)" after 30 seconds of silence.
+- **Multiple input directories:** each configured root is announced as `Inbox 1/N`, `Inbox 2/N`, and so on. Each root reports its file count, new/changed count, scan time, processing time, new photos and unchanged files, so an already-processed root can be compared with a newly added root.
 - Listing the inbox checks each file once, and the scan reuses those results. On the user's inbox (~9,700 files on `/mnt/c`), listing alone takes about 75 s.
 - **The overall percentage and time left** are weighted by this run's actual work, estimated up front: new files, photos needing a face scan, and so on. The faces step is re-estimated once its exact count is known.
 - **Speed:** about 0.5 s per new photo (analysis plus faces). A 5,000-photo batch takes roughly 40 minutes. Ctrl+C is safe, and the next run resumes.

@@ -169,25 +169,39 @@ def _unchanged(known, st, path: Path) -> bool:
 
 
 def plan(cfg: Config, conn: sqlite3.Connection,
-         note: Callable[[str], None] | None = None) -> tuple[list[tuple[Path, Path, os.stat_result]], int]:
+         note: Callable[[str], None] | None = None,
+         inbox_event: Callable[[str], None] | None = None) -> tuple[list[tuple[Path, Path, os.stat_result]], int]:
     """(every inbox file with its stat, how many need processing). Looking at thousands of files on
     a Windows drive takes a minute or more, so this reports as it goes, and ingest reuses the stats
     instead of checking every file twice."""
     known = {r["path"]: r for r in conn.execute("SELECT path, size, mtime, status, sha256 FROM sources")}
     files, pending = [], 0
-    for path, rel in configured_inbox_files(cfg):
-        st = path.stat()
-        files.append((path, rel, st))
-        if not _unchanged(known.get(str(rel)), st, path):
-            pending += 1
-        if note and len(files) % 250 == 0:
-            note(f"looking at the inbox: {len(files):,} files so far, {pending:,} new or changed")
+    roots = cfg.input_roots
+    for index, root in enumerate(roots):
+        started = time.monotonic()
+        root_files = list(inbox_files(root))
+        root_pending = 0
+        if inbox_event:
+            inbox_event(f"Inbox {index + 1}/{len(roots)}: {root} — scanning {len(root_files):,} files")
+        for path, relative in root_files:
+            rel = source_key(index, relative)
+            st = path.stat()
+            files.append((path, rel, st))
+            if not _unchanged(known.get(str(rel)), st, path):
+                pending += 1
+                root_pending += 1
+            if note and len(files) % 250 == 0:
+                note(f"looking at the inbox: {len(files):,} files so far, {pending:,} new or changed")
+        if inbox_event:
+            inbox_event(f"Inbox {index + 1}/{len(roots)}: scan complete in {time.monotonic() - started:.1f}s"
+                        f" — {len(root_files):,} files, {root_pending:,} new or changed")
     return files, pending
 
 
 def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = print,
            progress: Callable[[int, int], None] | None = None,
-           files: list[tuple] | None = None) -> IngestStats:
+           files: list[tuple] | None = None,
+           inbox_event: Callable[[str], None] | None = None) -> IngestStats:
     """Record every inbox file. Every file except OS caches ends up copied somewhere: photos to
     the library, videos to videos/, Live Photo clips beside their photo, the rest to unsorted_files/."""
     for index, root in enumerate(cfg.input_roots):
@@ -198,73 +212,101 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
     siblings: dict[Path, dict[str, str]] = {}  # folder → {lowercase name: real name}, for Live Photo pairing
 
     files = files if files is not None else list(configured_inbox_files(cfg))
-    for n, item in enumerate(files, start=1):
-        if progress:
-            progress(n - 1, len(files))
-        path, rel = item[0], item[1]
-        st = item[2] if len(item) > 2 else path.stat()  # plan() already looked at it
-        known = conn.execute("SELECT size, mtime, status, sha256 FROM sources WHERE path = ?", (str(rel),)).fetchone()
+    by_root: dict[int, list[tuple]] = {index: [] for index in range(len(cfg.input_roots))}
+    for item in files:
+        rel = item[1]
+        index = 0 if not rel.parts or not rel.parts[0].startswith("_psort_inbox_") else int(rel.parts[0].split("_")[-1])
+        by_root.setdefault(index, []).append(item)
+
+    processed = 0
+    for index, root in enumerate(cfg.input_roots):
+        root_files = by_root.get(index, [])
+        started = time.monotonic()
+        root_pending = sum(
+            not _unchanged(
+                conn.execute("SELECT size, mtime, status, sha256 FROM sources WHERE path = ?", (str(item[1]),)).fetchone(),
+                item[2] if len(item) > 2 else item[0].stat(), item[0],
+            )
+            for item in root_files
+        )
+        if inbox_event:
+            inbox_event(f"Inbox {index + 1}/{len(cfg.input_roots)}: {root} — processing "
+                        f"{len(root_files):,} files, {root_pending:,} new or changed")
+        root_new = stats.new_photos
+        root_unchanged = stats.unchanged
+        for item in root_files:
+            if progress:
+                progress(processed, len(files))
+            processed += 1
+            path, rel = item[0], item[1]
+            st = item[2] if len(item) > 2 else path.stat()  # plan() already looked at it
+            known = conn.execute("SELECT size, mtime, status, sha256 FROM sources WHERE path = ?", (str(rel),)).fetchone()
         # Unchanged files are skipped, except ones recorded without a copy by an earlier version.
-        if _unchanged(known, st, path):
-            stats.unchanged += 1
-            continue
+            if _unchanged(known, st, path):
+                stats.unchanged += 1
+                continue
 
         # Still being copied in? Windows keeps a file's change time current while it's written (its
         # size is often reserved up front), so a recently touched file is left for the next run.
-        if time.time() - max(st.st_mtime, st.st_ctime) < cfg.settle_seconds:
-            stats.arriving += 1
-            continue
-
-        kind = kind_of(path)
-        ext = path.suffix.lower()
-        old_sha = known["sha256"] if known else None
-        try:
-            if kind == "junk":
-                _record_source(conn, rel, st, "junk", "OS cache file (rebuilt automatically; not needed)")
-                stats.junk += 1
-            elif kind == "image":
-                _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats)
-            elif kind == "video":
-                if path.parent not in siblings:
-                    siblings[path.parent] = {p.name.lower(): p.name for p in path.parent.iterdir()}
-                _ingest_video(conn, path, rel, st, ext, siblings[path.parent], stats)
-            elif kind == "rich" and rich.is_package(path):
-                if path.parent not in siblings:
-                    siblings[path.parent] = {p.name.lower(): p.name for p in path.parent.iterdir()}
-                _ingest_rich(cfg, conn, path, rel, st, siblings[path.parent], detector, stats)
-            elif kind == "sidecar":
-                _ingest_other(conn, path, rel, st, "sidecar", SIDECAR_EXTS[ext])
-                stats.others += 1
-            else:
-                _ingest_other(conn, path, rel, st, "other", f"not a photo or video ('{ext or 'no extension'}')")
-                stats.others += 1
-        except StillArriving:
-            stats.arriving += 1
-            continue
-        except Exception as e:  # corrupt or truncated file: keep its bytes in unsorted_files anyway
-            reason = f"unreadable: {type(e).__name__}: {e}"
-            try:
-                _ingest_other(conn, path, rel, st, "error", reason)
-            except StillArriving:  # "unreadable" only because it's half-copied
+            if time.time() - max(st.st_mtime, st.st_ctime) < cfg.settle_seconds:
                 stats.arriving += 1
                 continue
-            except OSError:
-                _record_source(conn, rel, st, "error", reason)  # can't even read it; verify will flag it
-            stats.errors += 1
 
-        new = conn.execute("SELECT sha256, status FROM sources WHERE path = ?", (str(rel),)).fetchone()
-        if old_sha and new and new["sha256"] != old_sha and forget_content(cfg, conn, old_sha):
-            stats.replaced += 1
-        if known and known["status"] == "error" and new and new["status"] != "error":
-            stats.recovered += 1
-            _drop_unsorted_copy(cfg, conn, new["sha256"])
-        elif known and known["status"] == "other" and new and new["status"] == "rich":
-            _drop_unsorted_copy(cfg, conn, new["sha256"])  # was filed as "other" before packages were understood
+            kind = kind_of(path)
+            ext = path.suffix.lower()
+            old_sha = known["sha256"] if known else None
+            try:
+                if kind == "junk":
+                    _record_source(conn, rel, st, "junk", "OS cache file (rebuilt automatically; not needed)")
+                    stats.junk += 1
+                elif kind == "image":
+                    _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats)
+                elif kind == "video":
+                    if path.parent not in siblings:
+                        siblings[path.parent] = {p.name.lower(): p.name for p in path.parent.iterdir()}
+                    _ingest_video(conn, path, rel, st, ext, siblings[path.parent], stats)
+                elif kind == "rich" and rich.is_package(path):
+                    if path.parent not in siblings:
+                        siblings[path.parent] = {p.name.lower(): p.name for p in path.parent.iterdir()}
+                    _ingest_rich(cfg, conn, path, rel, st, siblings[path.parent], detector, stats)
+                elif kind == "sidecar":
+                    _ingest_other(conn, path, rel, st, "sidecar", SIDECAR_EXTS[ext])
+                    stats.others += 1
+                else:
+                    _ingest_other(conn, path, rel, st, "other", f"not a photo or video ('{ext or 'no extension'}')")
+                    stats.others += 1
+            except StillArriving:
+                stats.arriving += 1
+                continue
+            except Exception as e:  # corrupt or truncated file: keep its bytes in unsorted_files anyway
+                reason = f"unreadable: {type(e).__name__}: {e}"
+                try:
+                    _ingest_other(conn, path, rel, st, "error", reason)
+                except StillArriving:  # "unreadable" only because it's half-copied
+                    stats.arriving += 1
+                    continue
+                except OSError:
+                    _record_source(conn, rel, st, "error", reason)  # can't even read it; verify will flag it
+                stats.errors += 1
 
-        if n % 100 == 0:
-            conn.commit()
-            if not progress:
-                log(f"  …{n} files scanned")
+            new = conn.execute("SELECT sha256, status FROM sources WHERE path = ?", (str(rel),)).fetchone()
+            if old_sha and new and new["sha256"] != old_sha and forget_content(cfg, conn, old_sha):
+                stats.replaced += 1
+            if known and known["status"] == "error" and new and new["status"] != "error":
+                stats.recovered += 1
+                _drop_unsorted_copy(cfg, conn, new["sha256"])
+            elif known and known["status"] == "other" and new and new["status"] == "rich":
+                _drop_unsorted_copy(cfg, conn, new["sha256"])  # was filed as "other" before packages were understood
+
+            if processed % 100 == 0:
+                conn.commit()
+                if not progress:
+                    log(f"  …{processed} files scanned")
+
+        if inbox_event:
+            inbox_event(f"Inbox {index + 1}/{len(cfg.input_roots)}: processing complete in "
+                        f"{time.monotonic() - started:.1f}s — {stats.new_photos - root_new:,} new photos, "
+                        f"{stats.unchanged - root_unchanged:,} unchanged")
 
     conn.commit()
     stats.redated = redate_from_folders(conn)

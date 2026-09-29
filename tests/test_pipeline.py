@@ -136,6 +136,11 @@ def test_multiple_inboxes_keep_sources_distinct_and_reuse_content(psort, tmp_pat
     output = psort("run").output
 
     assert "0 new, 1 exact duplicates" in output
+    assert "Inbox 1/2:" in output and "Inbox 2/2:" in output
+    assert "Inbox 1/2: scan complete in " in output
+    assert "Inbox 2/2: " in output and "— scanning " in output
+    assert "Inbox 2/2: processing complete in " in output
+    assert output.index("Inbox 1/2: processing complete") < output.index("Inbox 2/2: processing")
     conn = db(tmp_path)
     assert conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 11
     source_paths = {r[0] for r in conn.execute("SELECT path FROM sources WHERE path LIKE '%notes.txt'")}

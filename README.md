@@ -17,6 +17,8 @@ uv run psort init --inbox <inbox> --library <library> --outbox <outbox>
 
 Repeat `--inbox` for each input directory. This writes `~/.config/psort/psort.toml`, creates the database in `~/.local/share/psort/`, and downloads the face models. The `videos/`, `unsorted_files/` and `highlights/` folders default to living beside the library.
 
+During `psort run`, each input is announced as `Inbox 1/N`, `Inbox 2/N`, and so on. psort reports each root's file count, new/changed count, scan time, processing time, new photos, and unchanged files before moving to the next root.
+
 ## Move to another computer
 
 The database is essential to preserving analysis and review decisions. The library's `.psort/manifest.json` is not a replacement: it omits face embeddings and other local state. To continue without re-analyzing photos:

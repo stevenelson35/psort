@@ -150,7 +150,7 @@ def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; sho
     p = Progress([Stage(n, 1) for n in names])
     p.start(0, "looking at the inbox…")
     try:
-        files, pending = ingest_mod.plan(cfg, conn, note=p.note)
+        files, pending = ingest_mod.plan(cfg, conn, note=p.note, inbox_event=p.echo)
     except BaseException:
         p.close()
         raise
@@ -536,7 +536,8 @@ def _ingest(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None, 
     say = _say(p)
     try:
         s = ingest(cfg, conn, log=say, files=files,
-                   progress=(lambda d, t: p.update(d, t, "files")) if p else None)
+                   progress=(lambda d, t: p.update(d, t, "files")) if p else None,
+                   inbox_event=say)
     except FileNotFoundError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from e
