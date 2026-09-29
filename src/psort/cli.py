@@ -53,7 +53,7 @@ def _open() -> tuple[Config, sqlite3.Connection]:
 
 @app.command()
 def init(
-    inbox: Annotated[Path, typer.Option(help="Folder you drop photo batches into. psort never writes here.")],
+    inbox: Annotated[list[Path], typer.Option(help="Input folder; repeat --inbox for additional folders. psort never writes here.")],
     library: Annotated[Path, typer.Option(help="Where the curated library is built.")],
     outbox: Annotated[Path, typer.Option(help="Where exports for blog posts go.")],
     state_dir: Annotated[Path, typer.Option(help="psort's database and models (keep inside WSL).")] = DEFAULT_STATE_DIR,
@@ -65,7 +65,11 @@ def init(
     if _config_path.exists() and not force:
         typer.secho(f"{_config_path} already exists (use --force to overwrite).", fg="red", err=True)
         raise typer.Exit(1)
-    inbox, library, outbox, state_dir = (p.expanduser().resolve() for p in (inbox, library, outbox, state_dir))
+    if not inbox:
+        typer.secho("At least one --inbox directory is required.", fg="red", err=True)
+        raise typer.Exit(1)
+    inbox = [p.expanduser().resolve() for p in inbox]
+    library, outbox, state_dir = (p.expanduser().resolve() for p in (library, outbox, state_dir))
     videos = videos.expanduser().resolve() if videos else None
     config_mod.write_default(_config_path, inbox, library, outbox, state_dir, videos)
     cfg = config_mod.load(_config_path)
@@ -73,8 +77,9 @@ def init(
     library.mkdir(parents=True, exist_ok=True)
     outbox.mkdir(parents=True, exist_ok=True)
     typer.echo(f"Wrote {_config_path}")
-    if not inbox.is_dir():
-        typer.secho(f"Note: inbox {inbox} doesn't exist yet.", fg="yellow")
+    for index, root in enumerate(inbox):
+        if not root.is_dir():
+            typer.secho(f"Note: inbox {index + 1} {root} doesn't exist yet.", fg="yellow")
     if face_model:
         _download_models(cfg)
 
@@ -133,8 +138,9 @@ def curate_cmd(dry_run: Annotated[bool, typer.Option(help="Show what would chang
 def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; show what would change.")] = False) -> None:
     """Ingest → group moments → score → arrange library → faces → highlights, with progress."""
     cfg, conn = _open()
-    if not cfg.inbox.is_dir():
-        typer.secho(f"Inbox not found: {cfg.inbox}", fg="red", err=True)
+    missing = [(i + 1, root) for i, root in enumerate(cfg.input_roots) if not root.is_dir()]
+    if missing:
+        typer.secho("Inbox not found: " + ", ".join(f"{i}: {root}" for i, root in missing), fg="red", err=True)
         raise typer.Exit(1)
     # One progress display for the whole run, showing from the very first moment: just looking at a
     # big inbox on a Windows drive takes a minute or more. Step sizes are filled in once known.

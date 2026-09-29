@@ -42,6 +42,11 @@ class Config:
     face_match_threshold: float = 0.45
     face_cluster_threshold: float = 0.5
     weights: Weights = field(default_factory=Weights)
+    inboxes: tuple[Path, ...] = ()
+
+    @property
+    def input_roots(self) -> tuple[Path, ...]:
+        return self.inboxes or (self.inbox,)
 
     @property
     def videos(self) -> Path:
@@ -76,6 +81,42 @@ class ConfigError(Exception):
     pass
 
 
+def source_key(root_index: int, relative: Path) -> Path:
+    """Keep root zero's historical keys; namespace later roots to avoid relative-path collisions."""
+    marker = relative.parts[0] if relative.parts else ""
+    if root_index == 0 and not marker.startswith("_psort_inbox_"):
+        return relative
+    return Path(f"_psort_inbox_{root_index}") / relative
+
+
+def source_location(cfg: Config, stored: str | Path) -> tuple[Path, Path]:
+    """Resolve a DB source key to its configured root and root-relative path."""
+    key = Path(stored)
+    parts = key.parts
+    prefix = parts[0] if parts else ""
+    marker = "_psort_inbox_"
+    if prefix.startswith(marker) and prefix[len(marker):].isdigit():
+        index = int(prefix[len(marker):])
+        if index < len(cfg.input_roots) and len(parts) >= 2:
+            return cfg.input_roots[index], Path(*parts[1:])
+    return cfg.input_roots[0], key
+
+
+def source_file(cfg: Config, stored: str | Path) -> Path:
+    root, relative = source_location(cfg, stored)
+    return root / relative
+
+
+def source_display(cfg: Config, path: Path) -> Path:
+    """Return an input path relative to whichever configured root contains it."""
+    for root in cfg.input_roots:
+        try:
+            return path.relative_to(root)
+        except ValueError:
+            continue
+    return path
+
+
 def load(path: Path) -> Config:
     if not path.exists():
         raise ConfigError(f"No config at {path}. Run `psort init` first.")
@@ -86,10 +127,16 @@ def load(path: Path) -> Config:
         inbox_opts = data.get("inbox", {})
         events = data.get("events", {})
         faces = data.get("faces", {})
+        configured_inboxes = paths.get("inboxes")
+        if configured_inboxes is not None and (not isinstance(configured_inboxes, list) or not configured_inboxes):
+            raise ConfigError("paths.inboxes must be a non-empty array of directories.")
+        inboxes = tuple(Path(p).expanduser() for p in configured_inboxes) if configured_inboxes is not None else ()
+        inbox = inboxes[0] if inboxes else Path(paths["inbox"]).expanduser()
         return Config(
-            inbox=Path(paths["inbox"]).expanduser(),
+            inbox=inbox,
             library=Path(paths["library"]).expanduser(),
             outbox=Path(paths["outbox"]).expanduser(),
+            inboxes=inboxes,
             state_dir=Path(paths.get("state_dir", DEFAULT_STATE_DIR)).expanduser(),
             videos_dir=Path(paths["videos"]).expanduser() if "videos" in paths else None,
             unsorted_dir=Path(paths["unsorted"]).expanduser() if "unsorted" in paths else None,
@@ -109,15 +156,18 @@ def load(path: Path) -> Config:
         raise ConfigError(f"Invalid config {path}: {e}") from e
 
 
-def write_default(path: Path, inbox: Path, library: Path, outbox: Path, state_dir: Path,
+def write_default(path: Path, inbox: Path | list[Path] | tuple[Path, ...], library: Path, outbox: Path, state_dir: Path,
                   videos: Path | None = None) -> None:
     # json.dumps produces valid TOML basic strings for paths.
     q = lambda p: json.dumps(str(p))  # noqa: E731
+    inboxes = (inbox,) if isinstance(inbox, Path) else tuple(inbox)
+    if not inboxes:
+        raise ConfigError("At least one inbox directory is required.")
     w = Weights()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f"""[paths]
-inbox = {q(inbox)}
+inboxes = [{", ".join(q(p) for p in inboxes)}]
 library = {q(library)}
 outbox = {q(outbox)}
 # Videos get the same year/day/event folders as the library, in their own tree.

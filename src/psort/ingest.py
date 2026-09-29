@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 from . import dates
-from .config import Config
+from .config import Config, source_file, source_key
 from . import rich
 from . import videos as videos_mod
 from .imaging import (
@@ -47,7 +47,10 @@ class IngestStats:
 
 
 def batch_of(rel: Path) -> str:
-    return rel.parts[0] if len(rel.parts) > 1 else "(inbox root)"
+    parts = rel.parts
+    if parts and parts[0].startswith("_psort_inbox_"):
+        parts = parts[1:]
+    return parts[0] if len(parts) > 1 else "(inbox root)"
 
 
 def inbox_files(inbox: Path, under: Path | None = None):
@@ -55,6 +58,15 @@ def inbox_files(inbox: Path, under: Path | None = None):
     for path in sorted((under or inbox).rglob("*")):
         if path.is_file():
             yield path, path.relative_to(inbox)
+
+
+def configured_inbox_files(cfg: Config):
+    """Yield every input file with a stable DB key; root order is part of that key."""
+    for index, root in enumerate(cfg.input_roots):
+        if not root.is_dir():
+            raise FileNotFoundError(f"Inbox {index + 1} not found: {root}")
+        for path, relative in inbox_files(root):
+            yield path, source_key(index, relative)
 
 
 def _taken_at(path: Path, rel: Path, exif_value: object, mtime: float) -> tuple[datetime, str]:
@@ -89,7 +101,7 @@ def redate_videos_from_thm(cfg: Config, conn: sqlite3.Connection) -> int:
             FROM videos v WHERE v.date_source IN {dates.sql_in(dates.NO_TIME)}"""
     ).fetchall()
     for r in rows:
-        if r["path"] and (dt := thm_date(cfg.inbox / r["path"])):
+        if r["path"] and (dt := thm_date(source_file(cfg, r["path"]))):
             conn.execute("UPDATE videos SET taken_at = ?, date_source = 'meta', name = NULL WHERE sha256 = ?",
                          (dt.isoformat(), r["sha256"]))
             changed += 1
@@ -163,7 +175,7 @@ def plan(cfg: Config, conn: sqlite3.Connection,
     instead of checking every file twice."""
     known = {r["path"]: r for r in conn.execute("SELECT path, size, mtime, status, sha256 FROM sources")}
     files, pending = [], 0
-    for path, rel in inbox_files(cfg.inbox):
+    for path, rel in configured_inbox_files(cfg):
         st = path.stat()
         files.append((path, rel, st))
         if not _unchanged(known.get(str(rel)), st, path):
@@ -178,13 +190,14 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
            files: list[tuple] | None = None) -> IngestStats:
     """Record every inbox file. Every file except OS caches ends up copied somewhere: photos to
     the library, videos to videos/, Live Photo clips beside their photo, the rest to unsorted_files/."""
-    if not cfg.inbox.is_dir():
-        raise FileNotFoundError(f"Inbox not found: {cfg.inbox}")
+    for index, root in enumerate(cfg.input_roots):
+        if not root.is_dir():
+            raise FileNotFoundError(f"Inbox {index + 1} not found: {root}")
     detector = FaceDetector.load(cfg.face_model)
     stats = IngestStats()
     siblings: dict[Path, dict[str, str]] = {}  # folder → {lowercase name: real name}, for Live Photo pairing
 
-    files = files if files is not None else list(inbox_files(cfg.inbox))
+    files = files if files is not None else list(configured_inbox_files(cfg))
     for n, item in enumerate(files, start=1):
         if progress:
             progress(n - 1, len(files))

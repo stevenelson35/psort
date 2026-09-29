@@ -12,9 +12,21 @@ Requires [uv](https://docs.astral.sh/uv/) (installed in `~/.local/bin`). No sudo
 unset VIRTUAL_ENV        # if your shell sets it to another project's venv
 uv sync
 uv run psort init --inbox <inbox> --library <library> --outbox <outbox>
+# Add another --inbox <directory> for each additional input root.
 ```
 
-This writes `~/.config/psort/psort.toml`, creates the database in `~/.local/share/psort/`, and downloads the face models. The `videos/`, `unsorted_files/` and `highlights/` folders default to living beside the library.
+Repeat `--inbox` for each input directory. This writes `~/.config/psort/psort.toml`, creates the database in `~/.local/share/psort/`, and downloads the face models. The `videos/`, `unsorted_files/` and `highlights/` folders default to living beside the library.
+
+## Move to another computer
+
+The database is essential to preserving analysis and review decisions. The library's `.psort/manifest.json` is not a replacement: it omits face embeddings and other local state. To continue without re-analyzing photos:
+
+1. Stop psort on the old computer. Copy the complete configured state directory (normally `~/.local/share/psort/`, including `psort.db` and `models/`), the library, every input directory, and the separate `videos/`, `unsorted_files/`, and `highlights/` directories if present.
+2. Install Python 3.12 or newer, install `uv`, clone this repository, and run `uv sync`.
+3. Copy `~/.config/psort/psort.toml` to the new computer and edit its `[paths]` entries for `inboxes`, `library`, `outbox`, `videos`, `unsorted`, `highlights`, and `state_dir` to the new locations. Use an ordered TOML array for inputs, for example `inboxes = ["/photos/imports-a", "/photos/imports-b"]`. Keep input directories in the same order as before; the database uses that order to find recorded source files. Keep `state_dir` pointed at the copied state directory.
+4. Run `uv run psort run`, then `uv run psort verify`.
+
+Do not run `psort init` with an empty state directory for this migration. It creates a fresh database, which loses review decisions and causes existing inputs to be processed as new. With the copied database, existing photo hashes, best-shot choices, face labels, and other review state are reused. psort still walks and stats the inputs; if copy tools changed file timestamps, it may hash files again, but matching photos are not re-analyzed. Face models in the copied state directory also avoid redownloading them. If you choose not to copy the database, expect to rebuild state by importing the inputs; the manifest cannot restore the full database, notably face embeddings and source/ingest history.
 
 ## Everyday use
 
@@ -22,7 +34,7 @@ This writes `~/.config/psort/psort.toml`, creates the database in `~/.local/shar
 uv run psort run            # new inbox files → library, with step-by-step progress
 uv run psort review         # review UI at http://localhost:5000 (Ctrl+C to stop)
 uv run psort status         # totals
-uv run psort verify         # is the whole inbox safely copied? (or: verify <batch>)
+uv run psort verify         # are all configured input directories safely copied? (or: verify <batch>)
 ```
 
 In the review UI you can:
@@ -50,5 +62,5 @@ psort never writes to the inbox, and every inbox file ends up copied somewhere, 
 ## Tests
 
 ```sh
-uv run pytest -q     # 99 tests; they use temporary folders only, never your real library
+uv run pytest -q     # tests use temporary folders only, never your real library
 ```

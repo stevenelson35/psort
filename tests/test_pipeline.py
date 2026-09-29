@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import shutil
 from pathlib import Path
 
 from PIL import Image
@@ -117,6 +118,69 @@ def test_verify(psort, tmp_path, sample_inbox):
     assert "The whole inbox is safe to delete" in psort("verify").output
 
     psort("verify", "../..", expect=1)
+
+
+def test_multiple_inboxes_keep_sources_distinct_and_reuse_content(psort, tmp_path, sample_inbox):
+    psort("run")
+    second = tmp_path / "second-inbox"
+    same_folder = second / "2026-phone-dump"
+    same_folder.mkdir(parents=True)
+    (same_folder / "IMG_0002.jpg").write_bytes((sample_inbox / "2026-phone-dump/IMG_0002.jpg").read_bytes())
+    (same_folder / "notes.txt").write_text("a distinct note from the second inbox")
+
+    psort("init", "--force", "--inbox", str(sample_inbox), "--inbox", str(second),
+          "--library", str(tmp_path / "library"), "--outbox", str(tmp_path / "outbox"),
+          "--state-dir", str(tmp_path / "state"), "--no-face-model")
+    config = tmp_path / "psort.toml"
+    config.write_text(config.read_text().replace("settle_seconds = 120", "settle_seconds = 0"))
+    output = psort("run").output
+
+    assert "0 new, 1 exact duplicates" in output
+    conn = db(tmp_path)
+    assert conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0] == 11
+    source_paths = {r[0] for r in conn.execute("SELECT path FROM sources WHERE path LIKE '%notes.txt'")}
+    assert source_paths == {
+        "2026-phone-dump/notes.txt",
+        "_psort_inbox_1/2026-phone-dump/notes.txt",
+    }
+    assert "_psort_inbox_1/2026-phone-dump/notes.txt" in library_files(tmp_path / "unsorted_files")
+    assert "safe to delete" in psort("verify").output
+
+
+def test_moved_machine_paths_reuse_transferred_state(psort, tmp_path, sample_inbox):
+    psort("run")
+    conn = db(tmp_path)
+    conn.execute("UPDATE photos SET user_best = 1 WHERE name = '20260703_145633'")
+    conn.commit()
+    conn.close()
+    psort("run")
+
+    new_machine = tmp_path / "new-machine"
+    moved_inbox = new_machine / "inputs"
+    moved_library = new_machine / "library"
+    moved_state = new_machine / "state"
+    moved_outbox = new_machine / "outbox"
+    new_machine.mkdir()
+    shutil.copytree(sample_inbox, moved_inbox)
+    shutil.copytree(tmp_path / "library", moved_library)
+    moved_state.mkdir()
+    source_db = sqlite3.connect(tmp_path / "state/psort.db")
+    target_db = sqlite3.connect(moved_state / "psort.db")
+    source_db.backup(target_db)
+    source_db.close()
+    target_db.close()
+
+    psort("init", "--force", "--inbox", str(moved_inbox), "--library", str(moved_library),
+          "--outbox", str(moved_outbox), "--state-dir", str(moved_state), "--no-face-model")
+    config = tmp_path / "psort.toml"
+    config.write_text(config.read_text().replace("settle_seconds = 120", "settle_seconds = 0"))
+    output = psort("run").output
+
+    assert "0 new, 0 exact duplicates, 15 unchanged" in output
+    conn = sqlite3.connect(moved_state / "psort.db")
+    assert conn.execute("SELECT user_best FROM photos WHERE name = '20260703_145633'").fetchone()[0] == 1
+    assert library_files(moved_library) == library_files(tmp_path / "library")
+    conn.close()
 
 
 def test_dry_run_leaves_library_empty(psort, tmp_path):

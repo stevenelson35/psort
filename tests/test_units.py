@@ -1,9 +1,11 @@
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
 from psort.dates import from_filename, parse_exif_datetime
 from psort.imaging import exposure_quality
+from psort.config import load, source_file
 
 
 def test_exif_datetime():
@@ -32,3 +34,15 @@ def test_exposure_prefers_midtones():
     white = np.full((100, 100), 255, np.uint8)
     dark = np.full((100, 100), 20, np.uint8)
     assert exposure_quality(mid) > exposure_quality(dark) > exposure_quality(white)
+
+
+def test_legacy_single_inbox_config_still_loads(tmp_path):
+    inbox = tmp_path / "inbox"
+    config = tmp_path / "psort.toml"
+    config.write_text(
+        f'[paths]\ninbox = "{inbox}"\nlibrary = "{tmp_path / "library"}"\n'
+        f'outbox = "{tmp_path / "outbox"}"\n'
+    )
+    cfg = load(config)
+    assert cfg.input_roots == (inbox,)
+    assert source_file(cfg, Path("batch/photo.jpg")) == inbox / "batch/photo.jpg"

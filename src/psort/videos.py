@@ -12,7 +12,7 @@ from pathlib import Path
 import cv2
 from PIL import Image
 
-from .config import Config
+from .config import Config, source_display
 from .dates import NO_TIME
 from .events import named_ranges, slug_for
 
@@ -196,7 +196,7 @@ def curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool = False, check_f
             if src is None:
                 stats.missing.append(row["name"])
                 continue
-            log(f"  copy video {src.relative_to(cfg.inbox)} → {target}")
+            log(f"  copy video {source_display(cfg, src)} → {target}")
             if not dry_run:
                 _copy_verified(src, dest, sha)
             stats.copied += 1

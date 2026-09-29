@@ -27,7 +27,7 @@ The user's actual locations are set in `~/.config/psort/psort.toml`:
 
 | Folder | Location (WSL path) | Written by psort? | Contents |
 |---|---|---|---|
-| **Inbox** | `/mnt/c/shared/media/psort_inbox` (outside OneDrive) | Never | Batches dropped in as subfolders of any shape and depth |
+| **Input directories** | Ordered `paths.inboxes` array in `psort.toml` (outside OneDrive) | Never | Each directory is scanned recursively; batches may be at any depth |
 | **Library** | `/mnt/c/Users/steve/OneDrive/photos/psort/a_library` | Yes | The curated master library (§5.4) |
 | **Videos** | `…/OneDrive/photos/psort/videos` | Yes | Videos, in the same year/day/event folders as the library (§5.8) |
 | **Unsorted files** | `…/OneDrive/photos/psort/unsorted_files` | Yes | Every other file, under its original inbox path with spaces → hyphens |
@@ -36,7 +36,8 @@ The user's actual locations are set in `~/.config/psort/psort.toml`:
 | **State** | `~/.local/share/psort/` (inside WSL) | Yes | SQLite database, thumbnail and poster caches, face models |
 
 - **The state database lives inside WSL.** SQLite locks unreliably on Windows drives mounted in WSL, and the WSL filesystem is much faster. After changes, psort writes a JSON copy of the state to `<library>/.psort/manifest.json`, so the library documents itself. Face embeddings are deliberately excluded (§5.7).
-- **Moving a folder:** move it in File Explorer, then edit its line in `psort.toml`. Inbox records are stored relative to the inbox, and library records relative to each root, so nothing is reprocessed. Don't re-run `psort init` for this; `init --force` would rewrite the whole config.
+- **Moving an input directory:** move it, then edit its entry in `paths.inboxes` without changing its position. Source records are relative to their ordered root, and library records are relative to each output root. Don't re-run `psort init` for this; `init --force` rewrites the config.
+- **Moving to another computer:** copy the complete state directory, library, all input directories and the separate videos/unsorted/highlights trees; then update the TOML paths. The database is required to retain review decisions and face embeddings. With the DB copied, hashes identify previously analyzed photos even if file timestamps changed; the scan still walks the inputs and may hash them. Preserve input-root order when editing paths.
 
 ## 3. File Types
 
@@ -58,7 +59,7 @@ The user's actual locations are set in `~/.config/psort/psort.toml`:
 `psort run` runs six steps and shows progress for each (§4.1). Most steps can also run on their own.
 
 ```
-inbox ─[1 scan]─► state DB ─[2 group moments]─► ─[3 score]─► ─[4 arrange library]─► library / videos / unsorted_files
+input directories ─[1 scan]─► state DB ─[2 group moments]─► ─[3 score]─► ─[4 arrange library]─► library / videos / unsorted_files
                                                                                           │
                                           ─[5 find faces]─► ─[6 update highlights]─► highlights/
                                                                                           │
@@ -82,7 +83,7 @@ inbox ─[1 scan]─► state DB ─[2 group moments]─► ─[3 score]─► �
 
 ### 5.1 Scan (ingest)
 
-- Walks the inbox recursively, at any depth, and records **every** file in `sources`: its path relative to the inbox, size, mtime, status and content hash.
+- Walks every configured input directory recursively, at any depth, and records **every** file in `sources`: its path relative to its root, size, mtime, status and content hash. `paths.inboxes` is ordered; root order must remain stable when reusing a database. Root zero keeps legacy source keys; later roots have `_psort_inbox_N/` source-key prefixes so identical relative paths do not collide.
 - **For each photo:**
   - **Content hash (SHA-256).** This is its identity. An exact duplicate is recorded but curated only once.
   - **Capture time**, from the first of these that works:
@@ -287,7 +288,7 @@ Run with `uv run psort …` from the repo.
 
 | Command | Does |
 |---|---|
-| `init --inbox … --library … --outbox …` | Creates `psort.toml` and the DB, and downloads the face models (`--no-face-model` skips them) |
+| `init --inbox … [--inbox …] --library … --outbox …` | Creates `psort.toml` and the DB, and downloads the face models (`--no-face-model` skips them) |
 | `run [--dry-run]` | The six steps with progress. `--dry-run` shows planned copies and moves without touching the library (the DB is still updated) |
 | `ingest` / `cluster` / `score` / `curate [--dry-run]` | Single steps |
 | `status` | Totals, including undated, close calls, trash, videos, Rich Capture, favorites and "not copied yet" |
@@ -315,7 +316,7 @@ Run with `uv run psort …` from the repo.
   - `Flask` (review UI)
   - stdlib `sqlite3`, `ftplib`, `zipfile`, `tomllib`
 - **Dev:** `pytest`, `pyftpdlib` (a real local FTP server for publish tests).
-- **Tests** (`uv run pytest`, 99 tests, about 80 s) use generated images, videos (OpenCV writer) and `.nar` packages, a local FTP server, and a git repo with a bare "GitHub" remote. They never touch the user's real config, DB, secrets or library.
+- **Tests** (`uv run pytest`) use generated images, videos (OpenCV writer) and `.nar` packages, a local FTP server, and a git repo with a bare "GitHub" remote. They never touch the user's real config, DB, secrets or library.
 
 ## 11. Decisions
 

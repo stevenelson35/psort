@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import Config
+from .config import Config, source_display, source_file, source_key
 from .dates import NO_TIME
 from .events import named_ranges, slug_for
 from .imaging import sha256_file
@@ -161,7 +161,7 @@ def curate(
                 stats.missing.append(row["name"])
                 continue
             if dry_run:
-                log(f"  copy {src.relative_to(cfg.inbox)} → {target}")
+                log(f"  copy {source_display(cfg, src)} → {target}")
             else:
                 _copy_verified(src, dest, sha)
                 if row["library_path"] is None:  # a brand-new photo, not just a re-copy
@@ -284,7 +284,7 @@ def _sync(cfg: Config, conn: sqlite3.Connection, root: Path, table: str, desired
             if src is None:
                 missing.append(target)
                 continue
-            log(f"  copy {label} {src.relative_to(cfg.inbox)} → {target}")
+            log(f"  copy {label} {source_display(cfg, src)} → {target}")
             if not dry_run:
                 _copy_verified(src, dest, sha)
             copied += 1
@@ -296,7 +296,7 @@ def _sync(cfg: Config, conn: sqlite3.Connection, root: Path, table: str, desired
 
 def _find_source(cfg: Config, conn: sqlite3.Connection, sha: str) -> Path | None:
     for r in conn.execute("SELECT path FROM sources WHERE sha256 = ? ORDER BY path", (sha,)):
-        path = cfg.inbox / r["path"]
+        path = source_file(cfg, r["path"])
         if path.exists():
             return path
     # A frame unpacked from a Rich Capture package: extract it again from the package.
@@ -314,48 +314,61 @@ class VerifyResult:
 
 def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> list[VerifyResult]:
     """Is every file in an inbox batch (or the whole inbox) safe to delete? (DESIGN.md §5.5)"""
-    batch_dir = (cfg.inbox / batch).resolve() if batch else cfg.inbox.resolve()
-    if not batch_dir.is_dir() or not batch_dir.is_relative_to(cfg.inbox.resolve()):
-        raise FileNotFoundError(f"No batch folder {batch!r} in {cfg.inbox}")
-
     results = []
-    for path, rel in inbox_files(cfg.inbox.resolve(), batch_dir):
-        src = conn.execute("SELECT * FROM sources WHERE path = ?", (str(rel),)).fetchone()
-        st = path.stat()
-        if src is None:
-            results.append(VerifyResult(str(rel), False, "not ingested yet (run `psort run`, or it's still arriving)"))
-        elif src["size"] != st.st_size or src["mtime"] != st.st_mtime:
-            results.append(VerifyResult(str(rel), False, "changed since it was ingested (run `psort run`)"))
-        elif src["status"] == "junk":
-            results.append(VerifyResult(str(rel), True, src["reason"]))
-        elif src["status"] == "rich":
-            results.append(_placed(conn, cfg.library, "rich_packages", src["sha256"],
-                                   "Rich Capture package beside its photo: ", rel=str(rel)))
-        elif src["status"] == "livephoto" and _photo_deleted(conn, str(rel)):
-            results.append(VerifyResult(str(rel), True, "Live Photo clip of a photo you deleted"))
-        elif src["status"] == "livephoto":
-            results.append(_placed(conn, cfg.library, "live_clips", src["sha256"], "Live Photo clip beside its photo: ",
-                                   rel=str(rel)))
-        elif src["status"] in ("sidecar", "other", "error"):
-            results.append(_placed(conn, cfg.unsorted, "other_files", src["sha256"],
-                                   f"{src['reason']}; kept in unsorted_files/", rel=str(rel)))
-        elif src["status"] == "video":
-            video = conn.execute("SELECT library_path FROM videos WHERE sha256 = ?", (src["sha256"],)).fetchone()
-            if video and video["library_path"] and (cfg.videos / video["library_path"]).exists():
-                results.append(VerifyResult(str(rel), True, f"video: {video['library_path']}"))
-            else:
-                results.append(VerifyResult(str(rel), False, "video not copied yet (run `psort run`)"))
-        elif src["status"] != "image":
-            results.append(VerifyResult(str(rel), False, f"not in library: {src['reason']}"))
-        elif deleted := conn.execute("SELECT purged FROM deleted_photos WHERE sha256 = ?", (src["sha256"],)).fetchone():
-            results.append(VerifyResult(str(rel), True, "you deleted this photo" +
-                                        (" (gone for good)" if deleted["purged"] else " (it's in library/_trash)")))
+    selected = []
+    for index, root in enumerate(cfg.input_roots):
+        root = root.resolve()
+        if batch:
+            batch_dir = (root / batch).resolve()
+            if batch_dir.is_dir() and batch_dir.is_relative_to(root):
+                selected.append((index, root, batch_dir))
         else:
-            photo = conn.execute("SELECT library_path FROM photos WHERE sha256 = ?", (src["sha256"],)).fetchone()
-            if photo["library_path"] and (cfg.library / photo["library_path"]).exists():
-                results.append(VerifyResult(str(rel), True, photo["library_path"]))
+            if not root.is_dir():
+                raise FileNotFoundError(f"Inbox {index + 1} not found: {root}")
+            selected.append((index, root, root))
+    if not selected:
+        raise FileNotFoundError(f"No matching batch folder {batch!r} in configured inboxes")
+
+    for index, root, under in selected:
+        for path, relative in inbox_files(root, under):
+            key = source_key(index, relative)
+            label = str(relative) if len(cfg.input_roots) == 1 else f"inbox {index + 1}/{relative}"
+            src = conn.execute("SELECT * FROM sources WHERE path = ?", (str(key),)).fetchone()
+            st = path.stat()
+            if src is None:
+                results.append(VerifyResult(label, False, "not ingested yet (run `psort run`, or it's still arriving)"))
+            elif src["size"] != st.st_size or src["mtime"] != st.st_mtime:
+                results.append(VerifyResult(label, False, "changed since it was ingested (run `psort run`)"))
+            elif src["status"] == "junk":
+                results.append(VerifyResult(label, True, src["reason"]))
+            elif src["status"] == "rich":
+                results.append(_placed(conn, cfg.library, "rich_packages", src["sha256"],
+                                       "Rich Capture package beside its photo: ", rel=label))
+            elif src["status"] == "livephoto" and _photo_deleted(conn, str(key)):
+                results.append(VerifyResult(label, True, "Live Photo clip of a photo you deleted"))
+            elif src["status"] == "livephoto":
+                results.append(_placed(conn, cfg.library, "live_clips", src["sha256"],
+                                       "Live Photo clip beside its photo: ", rel=label))
+            elif src["status"] in ("sidecar", "other", "error"):
+                results.append(_placed(conn, cfg.unsorted, "other_files", src["sha256"],
+                                       f"{src['reason']}; kept in unsorted_files/", rel=label))
+            elif src["status"] == "video":
+                video = conn.execute("SELECT library_path FROM videos WHERE sha256 = ?", (src["sha256"],)).fetchone()
+                if video and video["library_path"] and (cfg.videos / video["library_path"]).exists():
+                    results.append(VerifyResult(label, True, f"video: {video['library_path']}"))
+                else:
+                    results.append(VerifyResult(label, False, "video not copied yet (run `psort run`)"))
+            elif src["status"] != "image":
+                results.append(VerifyResult(label, False, f"not in library: {src['reason']}"))
+            elif deleted := conn.execute("SELECT purged FROM deleted_photos WHERE sha256 = ?", (src["sha256"],)).fetchone():
+                results.append(VerifyResult(label, True, "you deleted this photo" +
+                                            (" (gone for good)" if deleted["purged"] else " (it's in library/_trash)")))
             else:
-                results.append(VerifyResult(str(rel), False, "not copied to the library yet (run `psort run`)"))
+                photo = conn.execute("SELECT library_path FROM photos WHERE sha256 = ?", (src["sha256"],)).fetchone()
+                if photo["library_path"] and (cfg.library / photo["library_path"]).exists():
+                    results.append(VerifyResult(label, True, photo["library_path"]))
+                else:
+                    results.append(VerifyResult(label, False, "not copied to the library yet (run `psort run`)"))
     return results
 
 

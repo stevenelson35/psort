@@ -12,7 +12,7 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
-from .config import Config
+from .config import Config, source_file
 
 _LABELS = {"noflash": "no flash", "flash": "flash", "flashnoflash": "flash + no-flash blend"}
 
@@ -42,9 +42,10 @@ def extract_frame(cfg: Config, conn: sqlite3.Connection, frame_sha: str) -> Path
         """SELECT d.member, (SELECT MIN(s.path) FROM sources s WHERE s.sha256 = d.package_sha) AS package
            FROM derived_frames d WHERE d.sha256 = ?""", (frame_sha,)
     ).fetchone()
-    if row is None or row["package"] is None or not (cfg.inbox / row["package"]).exists():
+    package = source_file(cfg, row["package"]) if row and row["package"] is not None else None
+    if package is None or not package.exists():
         return None
-    with zipfile.ZipFile(cfg.inbox / row["package"]) as z:
+    with zipfile.ZipFile(package) as z:
         data = z.read(row["member"])
     if sha256_bytes(data) != frame_sha:
         return None
