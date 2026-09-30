@@ -17,6 +17,10 @@
 {% endif %}
 {% if photos %}
   {% if videos %}<h2>Photos</h2>{% endif %}
+  <div class="photo-display-control" role="group" aria-label="Photo framing">
+    <button type="button" data-photo-mode="fit" aria-pressed="true">Fit</button>
+    <button type="button" data-photo-mode="fill" aria-pressed="false">Fill</button>
+  </div>
   <form method="post" action="{{ url_for('delete_photos') }}" id="bulkdel" class="row"
         onsubmit="return confirm('Move the ticked photos to the trash?')">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -24,9 +28,23 @@
     <span class="muted">Click a photo to see every shot in its moment and choose the best. To clean up, tick photos and</span>
     <button class="danger">🗑 Delete ticked</button>
   </form>
-  <div class="grid">{% for p in photos %}
+  <div class="grid day-photos" id="day-photos" data-photo-mode="fit">{% for p in photos %}
     <div><label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulkdel"> select</label>{{ card(p) }}</div>
   {% endfor %}</div>
   <p class="muted small">Deleting a moment's best shot deletes just that shot; the next best takes its place.</p>
+  <script>
+    (() => {
+      const grid = document.getElementById("day-photos");
+      const buttons = document.querySelectorAll("button[data-photo-mode]");
+      const key = "psort-day-photo-mode";
+      const setMode = mode => {
+        grid.dataset.photoMode = mode;
+        buttons.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.photoMode === mode)));
+        localStorage.setItem(key, mode);
+      };
+      setMode(localStorage.getItem(key) === "fill" ? "fill" : "fit");
+      buttons.forEach(button => button.addEventListener("click", () => setMode(button.dataset.photoMode)));
+    })();
+  </script>
 {% endif %}
 {% endblock %}

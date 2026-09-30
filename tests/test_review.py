@@ -44,11 +44,13 @@ def test_pages_render(ui, tmp_path):
     home = text(ui.get("/"))
     assert "11 photos" in home and "Fri 3 Jul 2026" in home and "Undated" in home
     day = text(ui.get("/folder/2026/2026-07-03"))
+    assert 'data-photo-mode="fit"' in day and 'data-photo-mode="fill"' in day
     assert "20260703_145634" in day and "3 shots" in day
     assert "20260703_145633" not in day  # alternates only show inside their moment
     burst = sha_of(tmp_path, "20260703_145634")
     moment = text(ui.get(f"/moment/{burst['moment_id']}"))
     assert "Moment: 3 shots" in moment and "★ best" in moment and moment.count("Make this the best") == 2
+    assert "20260703_145633" in moment and "20260703_145636" in moment
     for page in ["/close-calls", "/events", "/faces", "/undated", "/tray"]:
         text(ui.get(page))
     assert ui.get("/folder/2026/nope").status_code == 404

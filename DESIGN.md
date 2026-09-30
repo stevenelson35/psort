@@ -236,7 +236,7 @@ a_library/
 - **`psort review`** starts Flask on **127.0.0.1:5000**, with no login. Requests whose Host isn't localhost are refused, and every change needs a per-launch token (a Jinja global, so imported macros see it). Dark mode is the default, with a light toggle remembered per browser.
 - **Pages:**
   - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed, plus an overall **progress bar** (days and photos reviewed vs. the whole library).
-  - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked**, 🎬 videos, and **Mark day reviewed**.
+  - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked**, 🎬 videos, and **Mark day reviewed**. Photo cards default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame.
   - **Reviewed days un-mark themselves:** if `psort run` copies a genuinely new photo (not a re-copy) into a day already marked reviewed, that day's `reviewed` row is dropped, so it shows as to-do again.
   - **Moment:** every shot with its score breakdown:
     - **Make this the best** / let psort pick again

@@ -87,6 +87,8 @@ def test_publish_uploads_images_and_always_replaces_the_manifest(psort, tmp_path
     run_publish()
     manifest_path = root / "pics/browse/browse-manifest.json"
     assert manifest_path.exists()
+    cors = (root / "pics/browse/.htaccess").read_text()
+    assert 'Access-Control-Allow-Origin "https://blog.itsallonesong.com"' in cors
     assert (root / "pics/browse/20260703_145634.jpg").exists()
     assert (root / "pics/browse/640/20260703_145634-640.jpg").exists()
 

@@ -50,6 +50,11 @@ table.folders td, table.events td, table.events th { padding: .25rem .8rem .25re
 .card.close { border-color: var(--warn); }
 .card.best { outline: 3px solid var(--ok); }
 .card img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--photo-bg); }
+.day-photos .card img { object-fit: contain; }
+.day-photos[data-photo-mode="fill"] .card img { object-fit: cover; }
+.photo-display-control { display: inline-flex; gap: 2px; padding: 2px; margin: .4rem 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.photo-display-control button { border: 0; background: transparent; }
+.photo-display-control button[aria-pressed="true"] { background: var(--accent); color: #fff; }
 .card figcaption { padding: .35rem .5rem; font-size: .85rem; }
 .card .name { font-family: ui-monospace, monospace; font-size: .8rem; margin-right: .3rem; }
 .people { color: var(--ok); } .tags { color: var(--muted); }

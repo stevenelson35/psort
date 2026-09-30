@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 from .blog import BlogSettings, Uploader, stage_images
 from .config import Config
@@ -82,7 +83,17 @@ def publish(cfg: Config, conn: sqlite3.Connection, settings: BlogSettings, passw
     shutil.rmtree(staged, ignore_errors=True)
     staged.mkdir(parents=True)
     files = stage_images(cfg, rows, staged)
-    log(f"Rendered {len(rows)} favorite(s) and their sizes ({len(files)} files).")
+    origin = urlsplit(settings.site_url)
+    if not origin.scheme or not origin.netloc:
+        raise BrowseError(f"Invalid site URL for CORS: {settings.site_url!r}")
+    cors_path = staged / ".htaccess"
+    cors_path.write_text(
+        "<IfModule mod_headers.c>\n"
+        f'  Header always set Access-Control-Allow-Origin "{origin.scheme}://{origin.netloc}"\n'
+        "</IfModule>\n"
+    )
+    files.append((cors_path, ".htaccess"))
+    log(f"Rendered {len(rows)} favorite(s), their sizes, and CORS config ({len(files)} files).")
     manifest_path = staged / MANIFEST_NAME
     manifest_path.write_text(json.dumps(build_manifest(conn), indent=1))
     if dry_run:
