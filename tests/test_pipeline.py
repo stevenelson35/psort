@@ -76,6 +76,25 @@ def test_rerun_is_idempotent(psort, tmp_path):
     }
 
 
+def test_manual_moment_override_survives_rerun(psort, tmp_path):
+    psort("run")
+    conn = db(tmp_path)
+    photos = conn.execute(
+        "SELECT sha256, moment_id FROM photos WHERE is_best = 1 ORDER BY taken_at LIMIT 2"
+    ).fetchall()
+    assert photos[0]["moment_id"] != photos[1]["moment_id"]
+    conn.execute("INSERT INTO moment_overrides (sha256, moment_id) VALUES (?, ?)",
+                 (photos[1]["sha256"], photos[0]["moment_id"]))
+    conn.commit()
+    conn.close()
+
+    psort("run")
+    conn = db(tmp_path)
+    moment_ids = {r[0] for r in conn.execute("SELECT DISTINCT moment_id FROM photos WHERE sha256 IN (?, ?)",
+                                               (photos[0]["sha256"], photos[1]["sha256"]))}
+    assert moment_ids == {photos[0]["moment_id"]}
+
+
 def test_user_best_pick_moves_files(psort, tmp_path):
     psort("run")
     conn = db(tmp_path)

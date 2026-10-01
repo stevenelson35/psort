@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS photos (
     first_seen     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Manual moment membership overrides, reapplied after each automatic clustering pass.
+CREATE TABLE IF NOT EXISTS moment_overrides (
+    sha256    TEXT PRIMARY KEY,
+    moment_id TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS videos (
     sha256       TEXT PRIMARY KEY,
     ext          TEXT NOT NULL,

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import card %}
+{% from "_macros.html" import card, image_zoom %}
 {% block title %}Favorites{% endblock %}
 {% block content %}
 <h1>★ Favorites</h1>
@@ -16,7 +16,8 @@
   <span class="muted">{{ photos|length }} photo{{ "" if photos|length == 1 else "s" }}</span>
 </form>
 {% if not photos %}<p>{% if year or person %}No favorites match.{% else %}No favorites yet. Click ☆ on any photo.{% endif %}</p>{% endif %}
-<div class="grid">
+{% if photos %}{{ image_zoom("favorite-photos") }}{% endif %}
+<div class="grid zoomable-grid" id="favorite-photos">
 {% for p in photos %}
   <div>
     {{ card(p) }}

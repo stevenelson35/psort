@@ -17,7 +17,7 @@
 </head>
 <body>
   <nav class="top">
-    <a href="{{ url_for('index') }}" class="brand">psort</a>
+    <a href="{{ url_for('index') }}" class="brand">Library</a>
     <a href="{{ url_for('favorites') }}">★ Favorites{% if counts.favorites %} <span class="pill">{{ counts.favorites }}</span>{% endif %}</a>
     <a href="{{ url_for('close_calls') }}">Close calls{% if counts.close_calls %} <span class="pill warn">{{ counts.close_calls }}</span>{% endif %}</a>
     <a href="{{ url_for('events') }}">Events</a>
@@ -34,5 +34,29 @@
     {% endfor %}
     {% block content %}{% endblock %}
   </main>
+  <script>
+    document.querySelectorAll("[data-image-zoom-target]").forEach(control => {
+      const grid = document.getElementById(control.dataset.imageZoomTarget);
+      if (!grid) return;
+      const min = Number(control.dataset.zoomMin);
+      const max = Number(control.dataset.zoomMax);
+      const step = Number(control.dataset.zoomStep);
+      const defaultSize = Number(control.dataset.zoomDefault);
+      const key = "psort-image-panel-size-" + grid.id;
+      let size = Number(localStorage.getItem(key)) || defaultSize;
+      const apply = () => {
+        grid.style.setProperty("--image-panel-min", size + "px");
+        control.querySelector("[data-zoom-value]").value = size + " px";
+      };
+      control.querySelectorAll("[data-zoom-step]").forEach(button => {
+        button.addEventListener("click", () => {
+          size = Math.max(min, Math.min(max, size + Number(button.dataset.zoomStep) * step));
+          localStorage.setItem(key, size);
+          apply();
+        });
+      });
+      apply();
+    });
+  </script>
 </body>
 </html>

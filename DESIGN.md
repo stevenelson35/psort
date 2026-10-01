@@ -236,13 +236,14 @@ a_library/
 - **`psort review`** starts Flask on **127.0.0.1:5000**, with no login. Requests whose Host isn't localhost are refused, and every change needs a per-launch token (a Jinja global, so imported macros see it). Dark mode is the default, with a light toggle remembered per browser.
 - **Pages:**
   - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed, plus an overall **progress bar** (days and photos reviewed vs. the whole library).
-  - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked**, 🎬 videos, and **Mark day reviewed**. Photo cards default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame.
+  - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked**, 🎬 videos, **Mark day reviewed**, and **Mark reviewed & return to Library**. Photo cards default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame. Filter the visible picks by identified person, close calls, or photos with no identified people; **All** resets the view and **Toggle all filters** selects or clears all specific filters.
   - **Reviewed days un-mark themselves:** if `psort run` copies a genuinely new photo (not a re-copy) into a day already marked reviewed, that day's `reviewed` row is dropped, so it shows as to-do again.
   - **Moment:** every shot with its score breakdown:
     - **Make this the best** / let psort pick again
     - ☆, tray, tags, fix date, 🗑 delete
+    - Detected faces beside their photo: **Not <name>**, **Ignore face**, **Un-ignore face**, and add/change identification
     - play the Live clip
-  - **★ Favorites** (year/person filters) · **Close calls** ("Pick this") · **Events** (name/through/unname) · **Faces** (name groups; person pages with "Not <name>") · **Videos** · **Undated** (exact date per photo, or **one date for all ticked**) · **🗑 Trash** (Restore / Empty) · **Post tray** (the composer, §8)
+  - **★ Favorites** (year/person filters) · **Close calls** ("Pick this" or confirm "Keep this as best") · **Events** (name/through/unname) · **Faces** (name groups; person pages with "Not <name>") · **Videos** · **Undated** (exact date per photo, or **one date for all ticked**) · **🗑 Trash** (Restore / Empty) · **Post tray** (the composer, §8)
 - Every decision updates the library right away (files move, folders rename), along with highlights.
 - **Clicks stay fast:** a decision re-scores in memory and moves only the files it affects. Files that aren't moving are trusted from the database rather than re-checked on disk. Checking all ~10,000 library files on OneDrive took about 2 minutes per click; now a click takes about 0.2 s. `psort run` still verifies every file.
 - **`manifest.json`** (about 10 MB) is written in the background 4 s after the last change, and again when the review page stops.

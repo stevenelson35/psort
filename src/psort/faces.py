@@ -196,6 +196,33 @@ def label(cfg: Config, conn: sqlite3.Connection, name: str, cluster: int | None 
     return len(ids)
 
 
+def identify(cfg: Config, conn: sqlite3.Connection, face_id: int, name: str) -> None:
+    """Set or change one face's person, remembering the previous identity as a rejection."""
+    name = name.strip()
+    if not name:
+        raise FaceError("Name can't be empty")
+    _check_faces(conn, [face_id])
+    current = conn.execute("SELECT person_id FROM faces WHERE id = ?", (face_id,)).fetchone()
+    conn.execute("INSERT OR IGNORE INTO people (name) VALUES (?)", (name,))
+    person_id = conn.execute("SELECT id FROM people WHERE name = ?", (name,)).fetchone()["id"]
+    if current["person_id"] is not None and current["person_id"] != person_id:
+        conn.execute("INSERT OR IGNORE INTO face_rejections (face_id, person_id) VALUES (?, ?)",
+                     (face_id, current["person_id"]))
+    conn.execute("DELETE FROM face_rejections WHERE face_id = ? AND person_id = ?", (face_id, person_id))
+    conn.execute(
+        "UPDATE faces SET person_id = ?, label_source = 'user', similarity = NULL, cluster = NULL, ignored = 0 "
+        "WHERE id = ?",
+        (person_id, face_id),
+    )
+    conn.commit()
+    assign(cfg, conn)
+    orphans = "SELECT id FROM people WHERE id NOT IN (SELECT person_id FROM faces WHERE person_id IS NOT NULL)"
+    conn.execute(f"DELETE FROM face_rejections WHERE person_id IN ({orphans})")
+    conn.execute(f"DELETE FROM people WHERE id IN ({orphans})")
+    conn.commit()
+    _sync_highlights(cfg, conn)
+
+
 def unlabel(cfg: Config, conn: sqlite3.Connection, face_ids: list[int]) -> None:
     """"Not this person": remove the name and never auto-match these faces to that person again."""
     _check_faces(conn, face_ids)

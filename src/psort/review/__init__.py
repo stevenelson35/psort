@@ -169,11 +169,24 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
                 ORDER BY p.taken_at, p.name""",
             (len(prefix), prefix),
         ).fetchall()
+        photo_people = defaultdict(list)
+        if photos:
+            shas = [p["sha256"] for p in photos]
+            marks = ",".join("?" * len(shas))
+            for row in db().execute(
+                f"SELECT f.sha256, pe.name FROM faces f JOIN people pe ON pe.id = f.person_id "
+                f"WHERE f.sha256 IN ({marks}) ORDER BY pe.name",
+                shas,
+            ):
+                if row["name"] not in photo_people[row["sha256"]]:
+                    photo_people[row["sha256"]].append(row["name"])
+        people = sorted({name for names in photo_people.values() for name in names})
         videos = db().execute(
             "SELECT * FROM videos WHERE substr(library_path, 1, ?) = ? ORDER BY taken_at, name",
             (len(prefix), prefix),
         ).fetchall()
-        return render_template("folder.html", info=info, photos=photos, videos=videos)
+        return render_template("folder.html", info=info, photos=photos, videos=videos,
+                               people=people, photo_people=photo_people)
 
     @app.get("/moment/<moment_id>")
     def moment(moment_id):
@@ -185,8 +198,20 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         ).fetchall()
         if not shots:
             abort(404)
+        shas = [s["sha256"] for s in shots]
+        marks = ",".join("?" * len(shas))
+        detected_faces = defaultdict(list)
+        for face in db().execute(
+            f"""SELECT f.id, f.sha256, f.label_source, f.similarity, f.ignored, pe.name AS person_name
+                FROM faces f LEFT JOIN people pe ON pe.id = f.person_id
+                WHERE f.sha256 IN ({marks}) ORDER BY f.id""",
+            shas,
+        ):
+            detected_faces[face["sha256"]].append(face)
+        people = [r["name"] for r in db().execute("SELECT name FROM people ORDER BY name")]
         return render_template("moment.html", shots=shots, moment_id=moment_id,
-                               folder_key=folder_key(shots[0]["library_path"]))
+                               folder_key=folder_key(shots[0]["library_path"]),
+                               detected_faces=detected_faces, face_people=people)
 
     @app.get("/close-calls")
     def close_calls():
@@ -313,6 +338,28 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     @app.post("/photo/<sha>/best")
     def best(sha):
         return act(actions.pick_best, cfg, db(), sha)
+
+    @app.post("/folder/<path:key>/combine")
+    def combine_moments(key):
+        shas = request.form.getlist("photo")
+        if not shas:
+            flash("Select best shots from at least two moments to combine them.", "error")
+            return back(url_for("folder", key=key))
+        marks = ",".join("?" * len(set(shas)))
+        rows = db().execute(
+            f"SELECT sha256, library_path, is_best FROM photos WHERE sha256 IN ({marks})", sorted(set(shas))
+        ).fetchall()
+        prefix = key + "/"
+        if len(rows) != len(set(shas)) or any(not r["is_best"] or not r["library_path"].startswith(prefix)
+                                              for r in rows):
+            flash("Choose best-shot cards from this day only.", "error")
+            return back(url_for("folder", key=key))
+        return act(actions.combine_moments, cfg, db(), shas, default=url_for("folder", key=key))
+
+    @app.post("/moment/<moment_id>/split")
+    def split_moment(moment_id):
+        return act(actions.split_moment, cfg, db(), moment_id, request.form.getlist("photo"),
+                   default=url_for("moment", moment_id=moment_id))
 
     @app.post("/moment/<moment_id>/auto")
     def auto(moment_id):
@@ -487,6 +534,10 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     @app.post("/faces/unlabel")
     def faces_unlabel():
         return act(faces_mod.unlabel, cfg, db(), [int(i) for i in request.form.getlist("face")], default="/faces")
+
+    @app.post("/faces/<int:face_id>/identify")
+    def face_identify(face_id):
+        return act(faces_mod.identify, cfg, db(), face_id, request.form.get("name", ""), default="/")
 
     @app.post("/faces/ignore")
     def faces_ignore():

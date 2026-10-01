@@ -41,9 +41,14 @@ def cluster(cfg: Config, conn: sqlite3.Connection) -> int:
         conn.executemany(
             "UPDATE photos SET moment_id = ? WHERE sha256 = ?", [(moment_id, m["sha256"]) for m in members]
         )
+    overrides = conn.execute("SELECT sha256, moment_id FROM moment_overrides").fetchall()
+    conn.executemany(
+        "UPDATE photos SET moment_id = ? WHERE sha256 = ?",
+        [(r["moment_id"], r["sha256"]) for r in overrides],
+    )
     conn.commit()
     mark_duplicates(cfg, conn)
-    return len(moments)
+    return conn.execute("SELECT COUNT(DISTINCT moment_id) FROM photos").fetchone()[0]
 
 
 def _is_copy(cfg: Config, a, b, hashes) -> bool:

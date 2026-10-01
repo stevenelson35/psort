@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import post %}
+{% from "_macros.html" import image_zoom, post %}
 {% block title %}{{ shots[0].name }}{% endblock %}
 {% block content %}
 {% set when, event = pretty_folder(folder_key) %}
@@ -13,7 +13,17 @@
     {% else %}psort picked the best shot automatically{% if shots[0].close_call %}, but it was a close call{% endif %}.{% endif %}
   </p>
 {% endif %}
-<div class="shots">
+{% if shots|length > 1 %}
+  <form method="post" action="{{ url_for('split_moment', moment_id=moment_id) }}" id="split-moment" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <span class="muted">Select shots to separate from this moment.</span>
+    <button>Move selected to a new moment</button>
+  </form>
+{% endif %}
+{{ image_zoom("moment-photos", 420, 260, 700, 40) }}
+<datalist id="face-people">{% for name in face_people %}<option value="{{ name }}">{% endfor %}</datalist>
+<div class="shots zoomable-shots" id="moment-photos">
 {% for s in shots %}
   <section class="shot{% if s.is_best %} best{% endif %}">
     <a href="{{ url_for('thumb', sha=s.sha256, size=1280) }}" target="_blank">
@@ -21,6 +31,41 @@
     </a>
     <div class="meta">
       <strong>{{ s.name }}</strong>
+      {% if shots|length > 1 %}<label class="tick moment-split"><input type="checkbox" name="photo" value="{{ s.sha256 }}" form="split-moment"> move to new moment</label>{% endif %}
+      {% if detected_faces.get(s.sha256) %}
+        <details class="detected-faces">
+          <summary>{{ detected_faces[s.sha256]|length }} detected face{{ "" if detected_faces[s.sha256]|length == 1 else "s" }} · edit identifications</summary>
+          <div class="detected-face-list">
+            {% for f in detected_faces[s.sha256] %}
+              <div class="detected-face">
+                <img src="{{ url_for('face_thumb', face_id=f.id) }}" loading="lazy" alt="Face crop {{ f.id }}">
+                <div>
+                  {% if f.person_name %}
+                    <span>{{ f.person_name }}</span>
+                    {% if f.label_source == 'auto' %}<span class="muted">automatic match</span>{% endif %}
+                    {{ post(url_for('faces_unlabel'), "Not " ~ f.person_name, fields={"face": f.id}) }}
+                  {% elif f.ignored %}
+                    <span class="muted">Ignored</span>
+                    {{ post(url_for('faces_unignore'), "Un-ignore face", fields={"face": f.id}) }}
+                  {% else %}
+                    <span class="muted">Unidentified</span>
+                  {% endif %}
+                  {% if not f.ignored %}
+                    {{ post(url_for('faces_ignore'), "Ignore face", fields={"face": f.id}) }}
+                  {% endif %}
+                  <form method="post" action="{{ url_for('face_identify', face_id=f.id) }}" class="row">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+                    <input name="name" list="face-people" value="{{ f.person_name or '' }}"
+                           placeholder="Add or change name" required>
+                    <button>{{ "Change name" if f.person_name else "Identify face" }}</button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+      {% endif %}
       {% if s.rich %}<span class="pill" title="Nokia Rich Capture: its frames are in this moment, and the .nar package is kept beside it">◈ Rich</span>{% endif %}
       {% if s.rich_frame %}<span class="pill" title="A frame from a Nokia Rich Capture package">◈ {{ s.rich_frame }} frame</span>{% endif %}
       {{ post(url_for('favorite', sha=s.sha256), "★ Favorite" if s.favorite else "☆ Add to favorites",
@@ -28,6 +73,7 @@
       {% if s.is_best %}<span class="pill ok">★ best</span>{% endif %}
       {% if s.duplicate_of %}<span class="pill">duplicate of {{ s.copy_of }}</span>
         <span class="muted">Same picture saved again. psort kept the better copy; this one is in _duplicates.</span>
+      {% elif s.is_best and s.close_call %}{{ post(url_for('best', sha=s.sha256), "Keep this as best", "ok") }}
       {% elif real|length > 1 and not s.is_best %}{{ post(url_for('best', sha=s.sha256), "Make this the best") }}{% endif %}
       {{ post(url_for('tray_toggle', sha=s.sha256), "Remove from post tray" if s.in_tray else "Add to post tray",
               "ok" if s.in_tray else "") }}

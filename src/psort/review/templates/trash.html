@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import post %}
+{% from "_macros.html" import image_zoom, post %}
 {% block title %}Trash{% endblock %}
 {% block content %}
 <h1>🗑 Trash</h1>
@@ -11,7 +11,8 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button class="danger">Empty trash ({{ photos|length }})</button>
   </form>
-  <div class="grid">
+  {{ image_zoom("trash-photos") }}
+  <div class="grid zoomable-grid" id="trash-photos">
   {% for p in photos %}
     <figure class="card">
       <img src="{{ url_for('trash_thumb', sha=p.sha256) }}" loading="lazy" alt="{{ p.name }}">

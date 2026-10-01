@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import card %}
+{% from "_macros.html" import card, image_zoom %}
 {% block title %}Undated{% endblock %}
 {% block content %}
 <h1>Undated photos</h1>
@@ -16,8 +16,9 @@
   </form>
   <p class="muted">Setting a date for several photos files them in that day's folder with the time unknown.
     To give one photo an exact time, use the date and time box under it.</p>
+  {{ image_zoom("undated-photos") }}
 {% endif %}
-<div class="grid">
+<div class="grid zoomable-grid" id="undated-photos">
 {% for p in photos %}
   <div>
     <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulk"> select</label>

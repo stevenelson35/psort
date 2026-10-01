@@ -43,17 +43,82 @@ def text(resp):
 def test_pages_render(ui, tmp_path):
     home = text(ui.get("/"))
     assert "11 photos" in home and "Fri 3 Jul 2026" in home and "Undated" in home
+    assert 'class="brand">Library</a>' in home
     day = text(ui.get("/folder/2026/2026-07-03"))
     assert 'data-photo-mode="fit"' in day and 'data-photo-mode="fill"' in day
+    assert 'data-image-zoom-target="day-photos"' in day
     assert "20260703_145634" in day and "3 shots" in day
     assert "20260703_145633" not in day  # alternates only show inside their moment
     burst = sha_of(tmp_path, "20260703_145634")
     moment = text(ui.get(f"/moment/{burst['moment_id']}"))
+    assert 'data-image-zoom-target="moment-photos"' in moment
     assert "Moment: 3 shots" in moment and "★ best" in moment and moment.count("Make this the best") == 2
     assert "20260703_145633" in moment and "20260703_145636" in moment
-    for page in ["/close-calls", "/events", "/faces", "/undated", "/tray"]:
+    assert 'data-image-zoom-target="undated-photos"' in text(ui.get("/undated"))
+    ui.post_ok(f"/photo/{burst['sha256']}/favorite")
+    assert 'data-image-zoom-target="favorite-photos"' in text(ui.get("/favorites"))
+    for page in ["/close-calls", "/events", "/faces", "/tray"]:
         text(ui.get(page))
     assert ui.get("/folder/2026/nope").status_code == 404
+
+
+def test_combine_and_split_moments_persist(ui, psort, tmp_path):
+    conn = db(tmp_path)
+    picks = conn.execute(
+        "SELECT sha256, moment_id FROM photos WHERE library_path LIKE '2026/2026-07-03/%' "
+        "AND is_best = 1 ORDER BY taken_at LIMIT 2"
+    ).fetchall()
+    assert len(picks) == 2 and picks[0]["moment_id"] != picks[1]["moment_id"]
+    conn.close()
+
+    day_url = "/folder/2026/2026-07-03"
+    response = ui.post_ok("/folder/2026/2026-07-03/combine", photo=[p["sha256"] for p in picks], next=day_url)
+    assert response.location == day_url
+    conn = db(tmp_path)
+    combined = {r["moment_id"] for r in conn.execute(
+        "SELECT moment_id FROM photos WHERE sha256 IN (?, ?)", (picks[0]["sha256"], picks[1]["sha256"]))}
+    assert len(combined) == 1
+    combined_id = next(iter(combined))
+    conn.close()
+
+    moment_url = f"/moment/{combined_id}"
+    response = ui.post_ok(f"/moment/{combined_id}/split", photo=picks[1]["sha256"], next=moment_url)
+    assert response.location == moment_url
+    conn = db(tmp_path)
+    split = {r["moment_id"] for r in conn.execute(
+        "SELECT moment_id FROM photos WHERE sha256 IN (?, ?)", (picks[0]["sha256"], picks[1]["sha256"]))}
+    assert len(split) == 2
+    conn.close()
+
+    psort("run")
+    conn = db(tmp_path)
+    persisted = {r["moment_id"] for r in conn.execute(
+        "SELECT moment_id FROM photos WHERE sha256 IN (?, ?)", (picks[0]["sha256"], picks[1]["sha256"]))}
+    assert len(persisted) == 2
+
+
+def test_day_filters_include_visible_people_and_close_calls(ui, tmp_path):
+    conn = db(tmp_path)
+    photo = conn.execute(
+        "SELECT sha256 FROM photos WHERE library_path LIKE '2026/2026-07-03/%' AND is_best = 1 LIMIT 1"
+    ).fetchone()
+    conn.execute("INSERT INTO people (name) VALUES ('Alice')")
+    person_id = conn.execute("SELECT id FROM people WHERE name = 'Alice'").fetchone()["id"]
+    vector = np.random.default_rng(12).normal(size=128).astype(np.float32)
+    vector /= np.linalg.norm(vector)
+    conn.execute(
+        "INSERT INTO faces (sha256, x, y, w, h, confidence, embedding, person_id, label_source) "
+        "VALUES (?, .3, .3, .3, .3, .9, ?, ?, 'user')",
+        (photo["sha256"], vector.tobytes(), person_id),
+    )
+    conn.execute("UPDATE photos SET close_call = 1 WHERE sha256 = ?", (photo["sha256"],))
+    conn.commit()
+
+    page = text(ui.get("/folder/2026/2026-07-03"))
+    assert 'data-filter-value="Alice"' in page
+    assert 'data-day-filter="close"' in page
+    assert 'data-day-filter="unidentified"' in page
+    assert 'data-people=' in page and 'data-close-call="true"' in page
 
 
 def test_thumbnails_including_heic(ui, tmp_path):
@@ -130,6 +195,32 @@ def test_tray_tags_reviewed(ui, tmp_path):
     assert "Not a day" in text(ui.get("/"))
 
 
+def test_mark_reviewed_and_return(ui, tmp_path):
+    day = text(ui.get("/folder/2026/2026-07-03"))
+    assert "Mark reviewed &amp; return to Library" in day
+
+    response = ui.post_ok("/day/2026-07-03/reviewed", next="/")
+    assert response.location == "/"
+    assert db(tmp_path).execute("SELECT 1 FROM reviewed WHERE day = '2026-07-03'").fetchone()
+
+
+def test_close_call_can_confirm_current_pick(ui, tmp_path):
+    conn = db(tmp_path)
+    chosen = conn.execute("SELECT sha256, moment_id FROM photos WHERE is_best = 1 LIMIT 1").fetchone()
+    conn.execute("UPDATE photos SET close_call = 1 WHERE sha256 = ?", (chosen["sha256"],))
+    conn.commit()
+
+    close_calls = text(ui.get("/close-calls"))
+    moment = text(ui.get(f"/moment/{chosen['moment_id']}"))
+    assert "Keep this as best" in close_calls
+    assert "Keep this as best" in moment
+
+    ui.post_ok(f"/photo/{chosen['sha256']}/best")
+    result = conn.execute("SELECT user_best, close_call FROM photos WHERE sha256 = ?", (chosen["sha256"],)).fetchone()
+    assert (result["user_best"], result["close_call"]) == (1, 0)
+    assert "No close calls." in text(ui.get("/close-calls"))
+
+
 def test_name_faces(ui, tmp_path):
     """Synthetic faces on real library photos: two look-alike faces and a stranger."""
     conn = db(tmp_path)
@@ -172,6 +263,33 @@ def test_name_faces(ui, tmp_path):
     ui.post_ok("/faces/unignore", face="3")
     assert conn.execute("SELECT ignored FROM faces WHERE id = 3").fetchone()["ignored"] == 0
     assert "No ignored faces" in text(ui.get("/faces/ignored"))
+
+
+def test_face_identity_can_be_set_and_removed_from_moment(ui, tmp_path):
+    conn = db(tmp_path)
+    photo = conn.execute("SELECT sha256, moment_id FROM photos ORDER BY name LIMIT 1").fetchone()
+    vector = np.random.default_rng(9).normal(size=128).astype(np.float32)
+    vector /= np.linalg.norm(vector)
+    face_id = conn.execute(
+        "INSERT INTO faces (sha256, x, y, w, h, confidence, embedding) VALUES (?, .3, .3, .3, .3, .9, ?)",
+        (photo["sha256"], vector.tobytes()),
+    ).lastrowid
+    conn.commit()
+    assign(ui.cfg, conn)
+
+    moment_url = f"/moment/{photo['moment_id']}"
+    page = text(ui.get(moment_url))
+    assert "Unidentified" in page and "Ignore face" in page and "Identify face" in page
+
+    ui.post_ok(f"/faces/{face_id}/identify", name="Alice", next=moment_url)
+    row = conn.execute("SELECT person_id, label_source FROM faces WHERE id = ?", (face_id,)).fetchone()
+    assert row["label_source"] == "user"
+    assert conn.execute("SELECT name FROM people WHERE id = ?", (row["person_id"],)).fetchone()["name"] == "Alice"
+    assert "Not Alice" in text(ui.get(moment_url))
+
+    ui.post_ok("/faces/unlabel", face=str(face_id), next=moment_url)
+    row = conn.execute("SELECT person_id, cluster FROM faces WHERE id = ?", (face_id,)).fetchone()
+    assert row["person_id"] is None and row["cluster"] is not None
 
 
 def test_reviewed_day_resets_when_a_new_photo_arrives(ui, psort, sample_inbox):

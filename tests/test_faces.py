@@ -7,7 +7,7 @@ import pytest
 
 from psort.config import Config
 from psort.db import SCHEMA, connect
-from psort.faces import FaceError, assign, ignore, ignored_faces, label, summary, unignore, unlabel
+from psort.faces import FaceError, assign, identify, ignore, ignored_faces, label, summary, unignore, unlabel
 
 
 @pytest.fixture
@@ -162,6 +162,27 @@ def test_ignore_unknown_face_errors(conn, cfg):
     assign(cfg, conn)
     with pytest.raises(FaceError):
         ignore(cfg, conn, [99999])
+
+
+def test_identify_changes_name_and_remembers_rejected_person(conn, cfg):
+    ids = sorted(add_faces(conn, {"a": 4}))
+    assign(cfg, conn)
+    label(cfg, conn, "Alice", face_ids=ids[:2])
+    identify(cfg, conn, ids[0], "Alice")
+    identify(cfg, conn, ids[0], "Bob")
+
+    row = conn.execute("SELECT person_id, label_source FROM faces WHERE id = ?", (ids[0],)).fetchone()
+    bob = conn.execute("SELECT id FROM people WHERE name = 'Bob'").fetchone()["id"]
+    alice = conn.execute("SELECT id FROM people WHERE name = 'Alice'").fetchone()["id"]
+    assert (row["person_id"], row["label_source"]) == (bob, "user")
+    assert conn.execute("SELECT 1 FROM face_rejections WHERE face_id = ? AND person_id = ?",
+                        (ids[0], alice)).fetchone()
+
+    ignore(cfg, conn, [ids[1]])
+    identify(cfg, conn, ids[1], "Carol")
+    row = conn.execute("SELECT ignored, person_id FROM faces WHERE id = ?", (ids[1],)).fetchone()
+    carol = conn.execute("SELECT id FROM people WHERE name = 'Carol'").fetchone()["id"]
+    assert (row["ignored"], row["person_id"]) == (0, carol)
 
 
 def test_old_database_is_upgraded(tmp_path):

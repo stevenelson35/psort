@@ -2,6 +2,7 @@
 rearranges the library to match."""
 
 import sqlite3
+import hashlib
 from datetime import date, datetime, time
 
 from . import highlights, trash
@@ -58,6 +59,68 @@ def clear_pick(cfg: Config, conn: sqlite3.Connection, moment_id: str) -> None:
     conn.execute("UPDATE photos SET user_best = 0 WHERE moment_id = ?", (moment_id,))
     conn.commit()
     refresh(cfg, conn)
+
+
+def combine_moments(cfg: Config, conn: sqlite3.Connection, photo_shas: list[str]) -> int:
+    """Combine the moments represented by selected day-page best shots; return moments combined."""
+    shas = sorted(set(photo_shas))
+    if len(shas) < 2:
+        raise ActionError("Select best shots from at least two moments to combine them.")
+    marks = ",".join("?" * len(shas))
+    selected = conn.execute(
+        f"SELECT sha256, moment_id, is_best FROM photos WHERE sha256 IN ({marks})", shas
+    ).fetchall()
+    if len(selected) != len(shas) or any(not r["is_best"] for r in selected):
+        raise ActionError("Select best-shot cards from the day page.")
+    moment_ids = {r["moment_id"] for r in selected}
+    if len(moment_ids) < 2:
+        raise ActionError("Select best shots from at least two different moments.")
+    moment_marks = ",".join("?" * len(moment_ids))
+    members = conn.execute(
+        f"SELECT sha256, moment_id, taken_at FROM photos WHERE moment_id IN ({moment_marks})", tuple(moment_ids)
+    ).fetchall()
+    target = min(members, key=lambda r: (r["taken_at"], r["sha256"]))["moment_id"]
+    conn.executemany(
+        "INSERT OR REPLACE INTO moment_overrides (sha256, moment_id) VALUES (?, ?)",
+        [(r["sha256"], target) for r in members],
+    )
+    conn.execute(f"UPDATE photos SET user_best = 0 WHERE moment_id IN ({moment_marks})", tuple(moment_ids))
+    conn.commit()
+    refresh(cfg, conn, recluster=True)
+    return len(moment_ids)
+
+
+def split_moment(cfg: Config, conn: sqlite3.Connection, moment_id: str, photo_shas: list[str]) -> int:
+    """Move selected photos into their own persistent moment; return photos moved."""
+    shas = sorted(set(photo_shas))
+    if not shas:
+        raise ActionError("Select at least one photo to move into a new moment.")
+    members = conn.execute(
+        "SELECT sha256, taken_at FROM photos WHERE moment_id = ? ORDER BY taken_at, sha256", (moment_id,)
+    ).fetchall()
+    if not members:
+        raise ActionError("That moment no longer exists.")
+    member_shas = {r["sha256"] for r in members}
+    if not set(shas) <= member_shas:
+        raise ActionError("Select photos from this moment only.")
+    if len(shas) == len(members):
+        raise ActionError("Leave at least one photo in the current moment.")
+
+    remaining = member_shas - set(shas)
+    seed = ":".join(shas)
+    split_id = hashlib.sha256(f"psort-split:{moment_id}:{seed}".encode()).hexdigest()
+    occupied = {r[0] for r in conn.execute("SELECT DISTINCT moment_id FROM photos")}
+    counter = 1
+    while split_id in occupied:
+        split_id = hashlib.sha256(f"psort-split:{moment_id}:{seed}:{counter}".encode()).hexdigest()
+        counter += 1
+    conn.executemany(
+        "INSERT OR REPLACE INTO moment_overrides (sha256, moment_id) VALUES (?, ?)",
+        [(sha, moment_id) for sha in remaining] + [(sha, split_id) for sha in shas],
+    )
+    conn.commit()
+    refresh(cfg, conn, recluster=True)
+    return len(shas)
 
 
 def set_date(cfg: Config, conn: sqlite3.Connection, sha: str, when: datetime) -> None:

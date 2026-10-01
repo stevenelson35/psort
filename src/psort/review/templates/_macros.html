@@ -8,6 +8,17 @@
   </form>
 {%- endmacro %}
 
+{% macro image_zoom(target, default=230, minimum=150, maximum=450, step=40) -%}
+  <div class="image-zoom-control" data-image-zoom-target="{{ target }}" data-zoom-default="{{ default }}"
+       data-zoom-min="{{ minimum }}" data-zoom-max="{{ maximum }}" data-zoom-step="{{ step }}"
+       role="group" aria-label="Image panel size">
+    <span class="muted">Panel size</span>
+    <button type="button" data-zoom-step="-1" aria-label="Zoom out" title="Smaller image panels">−</button>
+    <output data-zoom-value>{{ default }} px</output>
+    <button type="button" data-zoom-step="1" aria-label="Zoom in" title="Larger image panels">+</button>
+  </div>
+{%- endmacro %}
+
 {% macro card(p, link=true) -%}
   <figure class="card{% if p.close_call %} close{% endif %}">
     {% if link %}<a href="{{ url_for('moment', moment_id=p.moment_id) }}">{% endif %}
