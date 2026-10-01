@@ -121,9 +121,14 @@ def _joins(cfg: Config, row, current, hashes) -> bool:
 
 
 def score(cfg: Config, conn: sqlite3.Connection) -> None:
-    """Score each photo relative to its moment and mark the best (a user pick always wins)."""
+    """Score each photo relative to its moment and mark the best (a user pick always wins; a
+    favorite is preferred next, over the automatic score-based pick)."""
     w = cfg.weights
-    rows = conn.execute("SELECT * FROM photos ORDER BY moment_id, taken_at, sha256").fetchall()
+    rows = conn.execute(
+        """SELECT p.*, EXISTS (SELECT 1 FROM favorites f WHERE f.sha256 = p.sha256) AS is_favorite
+           FROM photos p
+           ORDER BY p.moment_id, p.taken_at, p.sha256"""
+    ).fetchall()
     for _, group in groupby(rows, key=lambda r: r["moment_id"]):
         everyone = list(group)
         everyone_shas = {m["sha256"] for m in everyone}
@@ -145,20 +150,27 @@ def score(cfg: Config, conn: sqlite3.Connection) -> None:
         # A pick of a copy counts as a pick of the copy it duplicates. If that pointer is stale
         # (e.g. the photo moved to a different moment since duplicates were last recomputed),
         # fall back to the photo itself so a pick never silently vanishes.
-        user_picks = []
-        for m in everyone:
-            if not m["user_best"]:
-                continue
+        def _resolve(m):
             pick = m["duplicate_of"] or m["sha256"]
-            user_picks.append(pick if pick in everyone_shas else m["sha256"])
+            return pick if pick in everyone_shas else m["sha256"]
+
+        user_picks = [_resolve(m) for m in everyone if m["user_best"]]
+        favorite_targets = {_resolve(m) for m in everyone if m["is_favorite"]}
+        favorite_members = [m for m in members if m["sha256"] in favorite_targets]
+
         if user_picks:
             best = user_picks[0]
+        elif favorite_members:
+            # Prefer a favorite over the plain top score, but still the sharpest/best-exposed one
+            # if more than one shot in this moment happens to be starred.
+            best = max(favorite_members, key=lambda m: scores[m["sha256"]])["sha256"]
         else:
             best = max(members, key=lambda m: scores[m["sha256"]])["sha256"]
         # Close call: the runner-up is nearly as good, so the automatic pick deserves a look.
-        # Once you've picked, it's settled.
+        # Once you've picked (or a favorite settled it), it's settled.
         ranked = sorted(scores.values(), reverse=True)
-        close = not user_picks and len(ranked) > 1 and ranked[0] - ranked[1] <= cfg.close_call_margin * ranked[0]
+        settled = bool(user_picks or favorite_members)
+        close = not settled and len(ranked) > 1 and ranked[0] - ranked[1] <= cfg.close_call_margin * ranked[0]
         conn.executemany(
             "UPDATE photos SET score = ?, is_best = ?, close_call = ? WHERE sha256 = ?",
             [(scores.get(m["sha256"]), int(m["sha256"] == best), int(close and not m["duplicate_of"]), m["sha256"])

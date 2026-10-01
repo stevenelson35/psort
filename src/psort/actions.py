@@ -211,13 +211,13 @@ def toggle_reviewed(conn: sqlite3.Connection, day: str) -> bool:
 
 
 def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
-    """Star / unstar a photo; its highlights/ copy appears or disappears to match."""
+    """Star / unstar a photo; its highlights/ copy appears or disappears to match. Starring a shot
+    (without an explicit pick already pinned) also makes it its moment's best, if it wasn't."""
     try:
         now = highlights.toggle_favorite(conn, sha)
     except highlights.HighlightError as e:
         raise ActionError(str(e)) from e
-    highlights.sync(cfg, conn)
-    _manifest(cfg, conn)
+    refresh(cfg, conn)
     return now
 
 

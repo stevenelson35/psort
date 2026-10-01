@@ -110,6 +110,36 @@ def test_combine_and_split_moments_persist(ui, psort, tmp_path):
     assert len(persisted) == 2
 
 
+def test_favorite_wins_combined_moments_best_pick_but_not_over_a_user_pick(ui, tmp_path):
+    conn = db(tmp_path)
+    picks = conn.execute(
+        "SELECT sha256, moment_id FROM photos WHERE library_path LIKE '2026/2026-07-03/%' "
+        "AND is_best = 1 ORDER BY taken_at LIMIT 2"
+    ).fetchall()
+    assert len(picks) == 2 and picks[0]["moment_id"] != picks[1]["moment_id"]
+    # Star the shot that wasn't automatically picked for its own moment.
+    second = picks[1]["sha256"]
+    conn.close()
+
+    ui.post_ok(f"/photo/{second}/favorite")
+    assert db(tmp_path).execute("SELECT is_best FROM photos WHERE sha256 = ?", (second,)).fetchone()["is_best"] == 1
+
+    day_url = "/folder/2026/2026-07-03"
+    ui.post_ok("/folder/2026/2026-07-03/combine", photo=[p["sha256"] for p in picks], next=day_url)
+    conn = db(tmp_path)
+    # The favorite becomes the combined moment's best, overriding the plain score-based pick.
+    row = conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (second,)).fetchone()
+    assert row["is_best"] == 1
+
+    # An explicit pick still outranks a favorite.
+    first = picks[0]["sha256"]
+    ui.post_ok(f"/photo/{first}/best")
+    row = conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (first,)).fetchone()
+    assert row["is_best"] == 1
+    row = conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (second,)).fetchone()
+    assert row["is_best"] == 0
+
+
 def test_day_filters_include_visible_people_and_close_calls(ui, tmp_path):
     conn = db(tmp_path)
     photo = conn.execute(

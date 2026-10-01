@@ -56,17 +56,22 @@ def test_favorite_creates_linked_highlight_and_unfavorite_removes_it(psort, tmp_
     assert "No favorites yet" in client.get("/favorites").get_data(as_text=True)
 
 
-def test_highlights_follow_moves_and_alternates_go_in_day_folder(psort, tmp_path):
+def test_favoriting_an_alternate_promotes_it_to_best(psort, tmp_path):
     psort("run")
     _, post = ui(tmp_path)
-    alternate = sha_of(tmp_path, "20260703_145633")["sha256"]  # the blurry one, in _alternates
+    alternate = sha_of(tmp_path, "20260703_145633")["sha256"]  # the blurry one, previously in _alternates
+    conn = db(tmp_path)
+    assert conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (alternate,)).fetchone()["is_best"] == 0
+
     post(f"/photo/{alternate}/favorite")
+    # Starring it (with no explicit pick pinned) makes it this moment's best shot.
+    assert conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (alternate,)).fetchone()["is_best"] == 1
     assert files(tmp_path / "highlights") == {"2026/2026-07-03/20260703_145633.jpg"}
 
     post("/events/name", event="20260703_145633", name="Birthday Party")
     assert files(tmp_path / "highlights") == {"2026/2026-07-03_birthday-party/20260703_145633.jpg"}
     title, _ = windows_props(tmp_path / "highlights/2026/2026-07-03_birthday-party/20260703_145633.jpg")
-    assert title.startswith("psort library: 2026/2026-07-03_birthday-party/_alternates/")
+    assert title == "psort library: 2026/2026-07-03_birthday-party/20260703_145633.jpg"
 
 
 def test_tags_and_people_become_windows_tags(psort, tmp_path):

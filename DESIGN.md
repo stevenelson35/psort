@@ -125,8 +125,9 @@ Scores are compared only **within a moment**. Weights live in `[weights]`:
 | Face sharpness (0.15) | Sharpness of the face regions |
 
 - The highest score is the **best** shot unless you've picked another. Your pick always wins.
+- **A favorite is preferred next:** if no shot in the moment is explicitly picked, but one is already starred (☆), it becomes the best shot instead of the plain top-scoring one (highest-scoring starred shot, if more than one is starred). Starring a shot re-scores its moment immediately, so this takes effect right away, not just on the next `psort run`. An explicit pick still always wins over a favorite.
 - **Tuning:** psort scores only sharpness, exposure and faces — not framing, composition or subject distance/detail. If the automatic pick is consistently the technically sharper but less well-framed shot, lowering `sharpness` and raising `exposure` in `[weights]` (they don't need to sum to 1) shifts the balance; there's no "framing" signal to weight today, so close calls involving framing differences still need a manual pick.
-- **Close calls:** when the runner-up is within `close_call_margin` (5%) of the best, the moment is flagged for review. The flag clears once you pick.
+- **Close calls:** when the runner-up is within `close_call_margin` (5%) of the best, the moment is flagged for review. The flag clears once you pick (or once a favorite settles it).
 - A user pick always resolves to a real photo in its moment, even if a photo's `duplicate_of` pointer is stale (e.g. left over from an older run); scoring falls back to the picked photo itself rather than silently leaving the moment with no best shot.
 - **Visual duplicates:** the same picture saved again with different bytes (re-downloads, re-compressions, resized shares). Two photos count as copies when all of these hold:
   - they're within 1 s of each other, with a hash distance of 2 or less and the same exposure
