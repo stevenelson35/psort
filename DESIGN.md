@@ -125,7 +125,9 @@ Scores are compared only **within a moment**. Weights live in `[weights]`:
 | Face sharpness (0.15) | Sharpness of the face regions |
 
 - The highest score is the **best** shot unless you've picked another. Your pick always wins.
+- **Tuning:** psort scores only sharpness, exposure and faces — not framing, composition or subject distance/detail. If the automatic pick is consistently the technically sharper but less well-framed shot, lowering `sharpness` and raising `exposure` in `[weights]` (they don't need to sum to 1) shifts the balance; there's no "framing" signal to weight today, so close calls involving framing differences still need a manual pick.
 - **Close calls:** when the runner-up is within `close_call_margin` (5%) of the best, the moment is flagged for review. The flag clears once you pick.
+- A user pick always resolves to a real photo in its moment, even if a photo's `duplicate_of` pointer is stale (e.g. left over from an older run); scoring falls back to the picked photo itself rather than silently leaving the moment with no best shot.
 - **Visual duplicates:** the same picture saved again with different bytes (re-downloads, re-compressions, resized shares). Two photos count as copies when all of these hold:
   - they're within 1 s of each other, with a hash distance of 2 or less and the same exposure
   - they're either the same size with sharpness within 10%, or the same shape at a different size
@@ -234,6 +236,7 @@ a_library/
 ## 6. Review UI
 
 - **`psort review`** starts Flask on **127.0.0.1:5000**, with no login. Requests whose Host isn't localhost are refused, and every change needs a per-launch token (a Jinja global, so imported macros see it). Dark mode is the default, with a light toggle remembered per browser.
+- **Errors:** Flask runs with debug off, so an unexpected exception would normally just show a bare "Internal Server Error." A global handler instead logs the full traceback to the terminal running `psort review` and shows a short message (with the exception type and text) as a flash on the page you were on, or an error page for a broken link.
 - **Pages:**
   - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed, plus an overall **progress bar** (days and photos reviewed vs. the whole library).
   - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked**, 🎬 videos, **Mark day reviewed**, and **Mark reviewed & return to Library**. Photo cards default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame. Filter the visible picks by identified person, close calls, or photos with no identified people; **All** resets the view and **Toggle all filters** selects or clears all specific filters.

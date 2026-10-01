@@ -62,6 +62,19 @@ def test_pages_render(ui, tmp_path):
     assert ui.get("/folder/2026/nope").status_code == 404
 
 
+def test_unexpected_errors_get_a_useful_message_instead_of_a_crash(ui, tmp_path, monkeypatch):
+    import psort.actions as actions_mod
+
+    def boom(cfg, conn, sha):
+        raise RuntimeError("synthetic failure for this test")
+
+    monkeypatch.setattr(actions_mod, "pick_best", boom)
+    sha = sha_of(tmp_path, "20260703_145633")["sha256"]
+    resp = ui.post_ok(f"/photo/{sha}/best", next="/")
+    assert resp.status_code == 302  # not a bare 500
+    assert "synthetic failure for this test" in text(ui.get("/"))
+
+
 def test_combine_and_split_moments_persist(ui, psort, tmp_path):
     conn = db(tmp_path)
     picks = conn.execute(

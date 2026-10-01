@@ -126,8 +126,9 @@ def score(cfg: Config, conn: sqlite3.Connection) -> None:
     rows = conn.execute("SELECT * FROM photos ORDER BY moment_id, taken_at, sha256").fetchall()
     for _, group in groupby(rows, key=lambda r: r["moment_id"]):
         everyone = list(group)
+        everyone_shas = {m["sha256"] for m in everyone}
         # Visual duplicates never compete: they're copies of a member that's still here.
-        members = [m for m in everyone if not m["duplicate_of"]]
+        members = [m for m in everyone if not m["duplicate_of"]] or everyone
         max_sharp = max(m["sharpness"] for m in members) or 1.0
         max_faces = max(m["faces"] or 0 for m in members)
         max_face_sharp = max(m["face_sharpness"] or 0.0 for m in members)
@@ -141,9 +142,19 @@ def score(cfg: Config, conn: sqlite3.Connection) -> None:
                 s += w.face_sharpness * (m["face_sharpness"] or 0.0) / max_face_sharp
             scores[m["sha256"]] = s
 
-        # A pick of a copy counts as a pick of the copy it duplicates.
-        user_picks = [m["duplicate_of"] or m["sha256"] for m in everyone if m["user_best"]]
-        best = user_picks[0] if user_picks else max(members, key=lambda m: scores[m["sha256"]])["sha256"]
+        # A pick of a copy counts as a pick of the copy it duplicates. If that pointer is stale
+        # (e.g. the photo moved to a different moment since duplicates were last recomputed),
+        # fall back to the photo itself so a pick never silently vanishes.
+        user_picks = []
+        for m in everyone:
+            if not m["user_best"]:
+                continue
+            pick = m["duplicate_of"] or m["sha256"]
+            user_picks.append(pick if pick in everyone_shas else m["sha256"])
+        if user_picks:
+            best = user_picks[0]
+        else:
+            best = max(members, key=lambda m: scores[m["sha256"]])["sha256"]
         # Close call: the runner-up is nearly as good, so the automatic pick deserves a look.
         # Once you've picked, it's settled.
         ranked = sorted(scores.values(), reverse=True)

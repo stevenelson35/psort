@@ -12,6 +12,7 @@ from pathlib import Path
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, send_file, url_for
 from PIL import Image
+from werkzeug.exceptions import HTTPException
 
 from .. import actions
 from .. import export as export_mod
@@ -132,6 +133,19 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         except (actions.ActionError, events_mod.EventError, faces_mod.FaceError, FileExistsError) as e:
             flash(str(e), "error")
         return back(default)
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(e):
+        # Flask hides the real cause behind a bare "Internal Server Error" when debug is off.
+        # Log it to the terminal running `psort review` and show something actionable instead.
+        if isinstance(e, HTTPException):
+            return e
+        app.logger.exception("Unhandled error on %s %s", request.method, request.path)
+        message = f"Something went wrong ({type(e).__name__}: {e}). Full details were printed to the terminal."
+        if request.method == "POST":
+            flash(message, "error")
+            return back("/")
+        return render_template("error.html", message=message), 500
 
     # ---- Browsing ----
 

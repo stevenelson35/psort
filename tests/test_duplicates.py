@@ -89,3 +89,40 @@ def test_review_ui_labels_duplicates(psort, tmp_path, sample_inbox: Path):
     page = client.get(f"/moment/{moment_id}").get_data(as_text=True)
     assert "duplicate of 20160416_113725" in page
     assert "Make this the best" not in page
+
+
+def test_picking_a_shot_with_a_stale_duplicate_pointer_does_not_crash(psort, tmp_path, sample_inbox: Path):
+    """Regression: if `duplicate_of` ever points outside the shot's current moment (e.g. left over
+    from an older psort version, or a one-off edit), picking that shot as best must not leave the
+    moment with zero `is_best` rows, which used to crash library.desired_paths() with a KeyError."""
+    from psort.config import load
+    from psort.review import create_app
+
+    psort("run")
+    conn = db(tmp_path)
+    burst = [r["sha256"] for r in conn.execute(
+        "SELECT sha256 FROM photos WHERE name IN ('20260703_145633', '20260703_145634', '20260703_145636') "
+        "ORDER BY name"
+    )]
+    assert len(burst) == 3
+    other_moment_sha = conn.execute(
+        "SELECT sha256 FROM photos WHERE name = '20260704_101500'"
+    ).fetchone()["sha256"]
+    # Simulate corruption: the third burst shot "duplicates" a photo from an unrelated moment.
+    conn.execute("UPDATE photos SET duplicate_of = ? WHERE sha256 = ?", (other_moment_sha, burst[2]))
+    conn.commit()
+
+    client = create_app(load(tmp_path / "psort.toml")).test_client()
+    token_page = client.get("/events").get_data(as_text=True)
+    import re
+
+    token = re.search(r'name="csrf" value="([^"]+)"', token_page).group(1)
+    resp = client.post(f"/photo/{burst[2]}/best", data={"csrf": token, "next": "/"})
+    assert resp.status_code == 302  # redirected normally, not a 500
+
+    row = conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (burst[2],)).fetchone()
+    assert row["is_best"] == 1
+    best_count = conn.execute(
+        "SELECT COUNT(*) FROM photos WHERE sha256 IN (?, ?, ?) AND is_best = 1", burst
+    ).fetchone()[0]
+    assert best_count == 1
