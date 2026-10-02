@@ -11,13 +11,17 @@
   </div>
 {% endif %}
 {% if not by_year %}<p>Nothing curated yet. Run <code>psort run</code>.</p>{% endif %}
+<label class="row muted"><input type="checkbox" id="show-day-thumbs" checked> Show day thumbnails
+  <span class="small">(tick "show on Library" under a moment on its day page to add one)</span></label>
+<div id="library" data-thumbs="on">
 {% for year, folders in by_year.items() %}
   <h2>{{ year }}</h2>
   <table class="folders">
     {% for f in folders %}
       {% set when, event = pretty_folder(f.key) %}
       <tr>
-        <td>{% if f.reviewed %}<span class="done" title="Reviewed">✓</span>{% endif %}</td>
+        <td>{% if f.reviewed %}<span class="done" title="Reviewed">✓</span>
+          {% elif f.status in ('pics added', 'moments updated') %}<span class="pill warn" title="Changed since you reviewed it">{{ f.status }}</span>{% endif %}</td>
         <td><a href="{{ url_for('folder', key=f.key) }}">{{ when }}</a></td>
         <td class="event">{{ event }}</td>
         <td class="num">{{ f.moments }} moments</td>
@@ -25,7 +29,26 @@
         <td>{% if f.videos %}<span class="pill">🎬 {{ f.videos }}</span>{% endif %}</td>
         <td>{% if f.close_calls %}<span class="pill warn">{{ f.close_calls }} close</span>{% endif %}</td>
       </tr>
+      {% if thumbs.get(f.key) %}
+      {% set pics = thumbs[f.key] %}
+      <tr class="day-thumbs"><td></td><td colspan="6">
+        {% for t in pics[:max_thumbs] %}<a href="{{ url_for('moment', moment_id=t.moment_id) }}"><img
+          src="{{ url_for('thumb', sha=t.sha256, size=320) }}" loading="lazy" alt="{{ t.name }}" title="{{ t.name }}"></a>{% endfor %}
+        {% if pics|length > max_thumbs %}<a href="{{ url_for('folder', key=f.key) }}" class="muted">+{{ pics|length - max_thumbs }} more</a>{% endif %}
+      </td></tr>
+      {% endif %}
     {% endfor %}
   </table>
 {% endfor %}
+</div>
+<script>
+  (() => {
+    const box = document.getElementById("show-day-thumbs");
+    const lib = document.getElementById("library");
+    const key = "psort-library-thumbs";
+    const apply = on => { lib.dataset.thumbs = on ? "on" : "off"; box.checked = on; };
+    apply(localStorage.getItem(key) !== "off");
+    box.addEventListener("change", () => { localStorage.setItem(key, box.checked ? "on" : "off"); apply(box.checked); });
+  })();
+</script>
 {% endblock %}

@@ -16,6 +16,7 @@ from werkzeug.exceptions import HTTPException
 
 from .. import actions
 from .. import backup as backup_mod
+from .. import daystatus
 from .. import export as export_mod
 from .. import events as events_mod
 from .. import faces as faces_mod
@@ -32,6 +33,7 @@ THUMB_SIZES = {320, 1280}
 GROUP_PAGE_LIMIT = 400  # faces shown at once on a group's page
 MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 MB) is rewritten
 BACKUP_DIR = Path.home() / "psort-backups"  # where `psort backup` / the Backup page save archives
+MAX_DAY_THUMBS = 12  # pinned moment thumbnails shown per day on the Library page; the rest are counted
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -47,6 +49,12 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         if "db" not in g:
             g.db = connect(cfg.db_path)
         return g.db
+
+    startup = connect(cfg.db_path)
+    try:
+        daystatus.backfill(startup)
+    finally:
+        startup.close()
 
     # manifest.json is big and lives on OneDrive: write it once things go quiet, not on every click.
     pending = {"timer": None}
@@ -169,14 +177,31 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
             "photos": sum(f["photos"] for f in reviewable),
             "photos_done": sum(f["photos"] for f in reviewable if f["reviewed"]),
         }
+        thumbs = defaultdict(list)
+        for r in db().execute(
+            """SELECT p.sha256, p.name, p.library_path, p.moment_id FROM library_pins lp
+               JOIN photos p ON p.moment_id = lp.moment_id AND p.is_best = 1
+               WHERE p.library_path IS NOT NULL ORDER BY p.taken_at, p.name"""
+        ):
+            thumbs[folder_key(r["library_path"])].append(r)
         return render_template("index.html", by_year=dict(sorted(by_year.items(), reverse=True)), stats=stats,
-                               progress=progress)
+                               progress=progress, thumbs=thumbs, max_thumbs=MAX_DAY_THUMBS)
 
     @app.get("/folder/<path:key>")
     def folder(key):
-        info = next((f for f in folders(db()) if f["key"] == key), None)
-        if info is None:
+        all_folders = folders(db())
+        keys = [f["key"] for f in all_folders]
+        if key not in keys:
             abort(404)
+        i = keys.index(key)
+        info = all_folders[i]
+        todo = [f["key"] for f in all_folders if f["day"] and not f["reviewed"]]
+        nav = {
+            "prev": keys[i - 1] if i > 0 else None,
+            "next": keys[i + 1] if i + 1 < len(keys) else None,
+            "prev_todo": next((k for k in reversed(todo) if k < key), None),
+            "next_todo": next((k for k in todo if k > key), None),
+        }
         # Prefix match, not LIKE: folder names contain '_', which LIKE treats as a wildcard.
         prefix = key + "/"
         photos = db().execute(
@@ -202,8 +227,13 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
             "SELECT * FROM videos WHERE substr(library_path, 1, ?) = ? ORDER BY taken_at, name",
             (len(prefix), prefix),
         ).fetchall()
+        pinned = {r[0] for r in db().execute("SELECT moment_id FROM library_pins")}
         return render_template("folder.html", info=info, photos=photos, videos=videos,
-                               people=people, photo_people=photo_people)
+                               people=people, photo_people=photo_people, nav=nav, pinned=pinned)
+
+    @app.post("/moment/<moment_id>/pin")
+    def pin_moment(moment_id):
+        return act(actions.set_pin, db(), moment_id, bool(request.form.get("pinned")))
 
     @app.get("/moment/<moment_id>")
     def moment(moment_id):
@@ -673,8 +703,8 @@ def pretty_folder(key: str) -> tuple[str, str]:
 
 
 def folders(conn: sqlite3.Connection) -> list[dict]:
-    """One entry per library folder (day or day+event), with counts."""
-    reviewed = {r["day"] for r in conn.execute("SELECT day FROM reviewed")}
+    """One entry per library folder (day or day+event), with counts and review status."""
+    status = daystatus.statuses(conn)
     acc: dict[str, dict] = {}
     def entry(key):
         return acc.setdefault(key, {"key": key, "photos": 0, "moments": set(), "close": set(), "videos": 0})
@@ -693,11 +723,13 @@ def folders(conn: sqlite3.Connection) -> list[dict]:
     out = []
     for key, f in sorted(acc.items()):
         day = None if key == "_undated" or key.endswith("_unknown-day") else key.split("/")[1][:10]
+        day_status = status.get(day, daystatus.NEW) if day else None
         out.append({
             "key": key, "year": "Undated" if key == "_undated" else key[:4], "day": day,
             "photos": f["photos"], "moments": len(f["moments"]), "close_calls": len(f["close"]),
             "videos": f["videos"],
-            "reviewed": day in reviewed,
+            "status": day_status,
+            "reviewed": day_status == daystatus.REVIEWED,
         })
     return out
 

@@ -179,10 +179,20 @@ CREATE TABLE IF NOT EXISTS exports (
     PRIMARY KEY (sha256, post)
 );
 
--- Days you've finished reviewing, 'YYYY-MM-DD'.
+-- Days you've finished reviewing, 'YYYY-MM-DD', with a fingerprint of the day at that time
+-- (see daystatus.py) so later added photos or re-clustering can be detected.
 CREATE TABLE IF NOT EXISTS reviewed (
     day          TEXT PRIMARY KEY,
-    reviewed_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    reviewed_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    photos_sig   TEXT,
+    moments_sig  TEXT,
+    photo_count  INTEGER
+);
+
+-- Moments whose best shot is shown as a thumbnail beside its day on the Library page.
+CREATE TABLE IF NOT EXISTS library_pins (
+    moment_id  TEXT PRIMARY KEY,
+    pinned_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS sources_sha ON sources(sha256);
@@ -198,6 +208,9 @@ _ADDED_COLUMNS = [
     ("photos", "duplicate_of", "TEXT"),
     ("tray", "position", "INTEGER NOT NULL DEFAULT 0"),
     ("faces", "ignored", "INTEGER NOT NULL DEFAULT 0"),
+    ("reviewed", "photos_sig", "TEXT"),
+    ("reviewed", "moments_sig", "TEXT"),
+    ("reviewed", "photo_count", "INTEGER"),
 ]
 
 

@@ -242,9 +242,10 @@ a_library/
 - **`psort review`** starts Flask on **127.0.0.1:5000**, with no login. Requests whose Host isn't localhost are refused, and every change needs a per-launch token (a Jinja global, so imported macros see it). Dark mode is the default, with a light toggle remembered per browser.
 - **Errors:** Flask runs with debug off, so an unexpected exception would normally just show a bare "Internal Server Error." A global handler instead logs the full traceback to the terminal running `psort review` and shows a short message (with the exception type and text) as a flash on the page you were on, or an error page for a broken link.
 - **Pages:**
-  - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed, plus an overall **progress bar** (days and photos reviewed vs. the whole library).
+  - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed (or a **pics added** / **moments updated** badge), plus an overall **progress bar** (days and photos reviewed vs. the whole library). A remembered **Show day thumbnails** toggle shows, under each day, the best shot of every moment you ticked **show on Library** on that day's page (up to 12 per day, then "+N more"; hidden thumbnails aren't loaded).
   - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked** or **Combine selected moments**, 🎬 videos, **Mark day reviewed**, and **Mark reviewed & return to Library**. Photo cards show each shot's width × height, and default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame. Filter the visible picks by identified person, close calls, favorites, or photos with no identified people; **All** resets the view and **Toggle all filters** selects or clears all specific filters. The **Favorites** filter also surfaces a moment's favorited shot even when it isn't that moment's current best (e.g. you starred an alternate after someone else's explicit pick already won). Zoom controls resize photo panels and reflow the grid; sizes are remembered per view.
-  - **Reviewed days un-mark themselves:** if `psort run` copies a genuinely new photo (not a re-copy) into a day already marked reviewed, that day's `reviewed` row is dropped, so it shows as to-do again.
+  - **Day status:** each day is **new** (never reviewed), **reviewed**, **pics added**, or **moments updated**. Marking a day reviewed stores a fingerprint of its photo set and of how those photos are grouped into moments (`daystatus.py`); status is derived by comparing that fingerprint with the day as it is now. So a `psort run` that adds photos to a day, or re-clusters it (e.g. after changing `[cluster]` settings), flags just that day, and days whose photos and grouping didn't change stay reviewed — nothing is reset during a run. Clicking **Mark day reviewed** on a flagged day re-marks it as it is now. Your own combine/split/delete on a reviewed day re-marks it afterward, so your edits don't flag it. Favorites, picks and pins aren't part of the fingerprint. Days marked reviewed by an older psort are fingerprinted (as they are at that moment) by the next command or review start, before any re-clustering.
+  - **Day navigation:** ← Back to Library, previous/next day, and previous/next **unreviewed** day (any status but reviewed), plus **Mark reviewed & next unreviewed**. Each best-shot card has a **show on Library** checkbox (stored per moment in `library_pins`).
   - **Moment:** every shot with its score breakdown; select shots and **Move selected to a new moment** to split them:
     - **Make this the best** / let psort pick again
     - ☆, tray, tags, fix date, 🗑 delete
@@ -353,6 +354,7 @@ Run with `uv run psort …` from the repo.
 - **2026-09-29:** multiple ordered `[paths.inboxes]` input roots (§2), per-inbox scan/processing progress during `psort run` (§4.1), and `psort publish-browse` now writes a CORS rule so the blog origin can fetch its manifest.
 - **2026-09-30 to 2026-10-01:** day pages got Fit/Fill photo framing, person/close-call/unidentified filters, and a zoom control for panel size (also on Favorites/Undated/Trash/moment pages); moments can be combined (day page) or split (moment page) by hand, persisted in `moment_overrides` and reapplied after every recluster; detected faces can be identified/corrected/ignored right from a photo on its moment page, not just from the Faces pages; an unexpected review-UI error now logs a traceback to the terminal and shows a useful message instead of a bare 500; and a starred favorite is now preferred over the plain top score when psort picks a moment's best shot (§5.3), including right after combining moments.
 - **2026-10-01 (later):** day pages show each photo's width × height and a **Favorites** filter (surfaces a moment's favorited shot even when it's not that moment's current best); scoring gained a **Resolution** weight so a higher-pixel-count shot wins close/ambiguous comparisons; and `psort backup` / a **Backup** page in the review UI archive the config and state directories into a dated, commit-tagged `.tar.gz` (§9, §6).
+- **2026-10-01 (evening):** day review status is now derived from a stored fingerprint (new / reviewed / pics added / moments updated), replacing the old "drop the reviewed row when a new photo lands"; day pages got previous/next and previous/next-unreviewed navigation; and moments can be pinned to show a thumbnail beside their day on the Library page (§6).
 
 ### Backlog and ideas (not built)
 - **People filter** on day pages and in search, beyond Favorites. Optionally, favor shots where family faces are sharp.
@@ -389,6 +391,7 @@ Run with `uv run psort …` from the repo.
 | `actions.py` | Review decisions shared by UI and CLI; `refresh()` re-scores, curates, syncs highlights, writes the manifest; `combine_moments`/`split_moment` edit `moment_overrides` |
 | `progress.py` | Step/overall progress display |
 | `backup.py` | Archives the config and state directories into a dated, commit-tagged `.tar.gz` |
+| `daystatus.py` | Per-day review fingerprints and derived status (new / reviewed / pics added / moments updated) |
 | `review/` | Flask app (`__init__.py`), Jinja templates, `static/style.css` |
 
 ### Data model (SQLite, `~/.local/share/psort/psort.db`)
@@ -400,7 +403,7 @@ Run with `uv run psort …` from the repo.
   - each has a `library_path` relative to its root
 - **Review state:**
   - `named_events`, `people`, `faces` (embedding BLOB, `person_id`, `label_source`, `cluster`, `ignored`), `face_rejections`
-  - `tags`, `favorites`, `highlights` (the files psort wrote), `tray` (with `position`), `post_draft`, `exports`, `reviewed`
+  - `tags`, `favorites`, `highlights` (the files psort wrote), `tray` (with `position`), `post_draft`, `exports`, `reviewed` (day, plus `photos_sig`/`moments_sig`/`photo_count` fingerprint), `library_pins` (moments shown on the Library page)
   - `deleted_photos` (with `trash_path`, `purged`, and the full row as JSON)
 
 ### Gotchas

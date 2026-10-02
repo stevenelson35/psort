@@ -48,7 +48,12 @@ def _open() -> tuple[Config, sqlite3.Connection]:
     except ConfigError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from e
-    return cfg, connect(cfg.db_path)
+    conn = connect(cfg.db_path)
+    # Before any re-clustering, so a day reviewed under an older psort keeps the grouping it had.
+    from . import daystatus
+
+    daystatus.backfill(conn)
+    return cfg, conn
 
 
 @app.command()

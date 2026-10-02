@@ -5,9 +5,9 @@ import sqlite3
 import hashlib
 from datetime import date, datetime, time
 
-from . import highlights, trash
+from . import daystatus, highlights, trash
 from .config import Config
-from .library import assign_names, curate, write_manifest
+from .library import assign_names, curate, day_of, write_manifest
 from .moments import cluster, score
 
 
@@ -46,6 +46,22 @@ def _photo(conn: sqlite3.Connection, sha: str) -> sqlite3.Row:
     return row
 
 
+def _reviewed_days_of_moments(conn: sqlite3.Connection, moment_ids: set[str]) -> list[str]:
+    """Currently-reviewed days holding these moments, to re-mark after an edit you made there."""
+    if not moment_ids:
+        return []
+    marks = ",".join("?" * len(moment_ids))
+    days = {day_of(r["library_path"]) for r in conn.execute(
+        f"SELECT library_path FROM photos WHERE library_path IS NOT NULL AND moment_id IN ({marks})",
+        tuple(moment_ids))}
+    return daystatus.keep_reviewed(conn, {d for d in days if d})
+
+
+def _remark(conn: sqlite3.Connection, days: list[str]) -> None:
+    for day in days:
+        daystatus.mark(conn, day)
+
+
 def pick_best(cfg: Config, conn: sqlite3.Connection, sha: str) -> None:
     """Your choice of best shot for its moment. It sticks through every later run."""
     photo = _photo(conn, sha)
@@ -80,6 +96,7 @@ def combine_moments(cfg: Config, conn: sqlite3.Connection, photo_shas: list[str]
         f"SELECT sha256, moment_id, taken_at FROM photos WHERE moment_id IN ({moment_marks})", tuple(moment_ids)
     ).fetchall()
     target = min(members, key=lambda r: (r["taken_at"], r["sha256"]))["moment_id"]
+    keep = _reviewed_days_of_moments(conn, moment_ids)
     conn.executemany(
         "INSERT OR REPLACE INTO moment_overrides (sha256, moment_id) VALUES (?, ?)",
         [(r["sha256"], target) for r in members],
@@ -87,6 +104,7 @@ def combine_moments(cfg: Config, conn: sqlite3.Connection, photo_shas: list[str]
     conn.execute(f"UPDATE photos SET user_best = 0 WHERE moment_id IN ({moment_marks})", tuple(moment_ids))
     conn.commit()
     refresh(cfg, conn, recluster=True)
+    _remark(conn, keep)
     return len(moment_ids)
 
 
@@ -114,12 +132,14 @@ def split_moment(cfg: Config, conn: sqlite3.Connection, moment_id: str, photo_sh
     while split_id in occupied:
         split_id = hashlib.sha256(f"psort-split:{moment_id}:{seed}:{counter}".encode()).hexdigest()
         counter += 1
+    keep = _reviewed_days_of_moments(conn, {moment_id})
     conn.executemany(
         "INSERT OR REPLACE INTO moment_overrides (sha256, moment_id) VALUES (?, ?)",
         [(sha, moment_id) for sha in remaining] + [(sha, split_id) for sha in shas],
     )
     conn.commit()
     refresh(cfg, conn, recluster=True)
+    _remark(conn, keep)
     return len(shas)
 
 
@@ -197,17 +217,29 @@ def move_in_tray(conn: sqlite3.Connection, sha: str, step: int) -> None:
 
 
 def toggle_reviewed(conn: sqlite3.Connection, day: str) -> bool:
-    """Mark a day reviewed (or not). Returns True if it's now reviewed."""
+    """Mark a day reviewed as it is now, or un-mark it if it's currently reviewed. A day flagged
+    'pics added' or 'moments updated' is re-marked (not un-marked). Returns True if now reviewed."""
     try:
         datetime.strptime(day, "%Y-%m-%d")
     except ValueError as e:
         raise ActionError(f"Not a day: {day!r}") from e
-    if conn.execute("DELETE FROM reviewed WHERE day = ?", (day,)).rowcount:
+    if daystatus.status(conn, day) == daystatus.REVIEWED:
+        conn.execute("DELETE FROM reviewed WHERE day = ?", (day,))
         conn.commit()
         return False
-    conn.execute("INSERT INTO reviewed (day) VALUES (?)", (day,))
-    conn.commit()
+    daystatus.mark(conn, day)
     return True
+
+
+def set_pin(conn: sqlite3.Connection, moment_id: str, pinned: bool) -> None:
+    """Show (or stop showing) a moment's best shot beside its day on the Library page."""
+    if not conn.execute("SELECT 1 FROM photos WHERE moment_id = ?", (moment_id,)).fetchone():
+        raise ActionError("That moment no longer exists.")
+    if pinned:
+        conn.execute("INSERT OR IGNORE INTO library_pins (moment_id) VALUES (?)", (moment_id,))
+    else:
+        conn.execute("DELETE FROM library_pins WHERE moment_id = ?", (moment_id,))
+    conn.commit()
 
 
 def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
@@ -223,11 +255,15 @@ def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
 
 def delete_photos(cfg: Config, conn: sqlite3.Connection, shas: list[str]) -> int:
     """Move photos to library/_trash (restorable); they're never copied back from the inbox."""
+    marks = ",".join("?" * len(shas)) or "''"
+    moments = {r[0] for r in conn.execute(f"SELECT moment_id FROM photos WHERE sha256 IN ({marks})", shas)}
+    keep = _reviewed_days_of_moments(conn, moments)
     try:
         n = trash.delete(cfg, conn, shas)
     except trash.TrashError as e:
         raise ActionError(str(e)) from e
     refresh(cfg, conn, recluster=True)  # another shot may become the best
+    _remark(conn, keep)
     return n
 
 

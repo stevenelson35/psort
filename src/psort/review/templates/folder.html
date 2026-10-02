@@ -3,12 +3,20 @@
 {% set when, event = pretty_folder(info.key) %}
 {% block title %}{{ when }}{% endblock %}
 {% block content %}
-<h1>{{ when }} <span class="event">{{ event }}</span></h1>
+<nav class="day-nav row" aria-label="Day navigation">
+  <a href="{{ url_for('index') }}">← Back to Library</a>
+  {% if nav.prev %}<a href="{{ url_for('folder', key=nav.prev) }}">‹ Previous day ({{ pretty_folder(nav.prev)[0] }})</a>{% endif %}
+  {% if nav.next %}<a href="{{ url_for('folder', key=nav.next) }}">Next day ({{ pretty_folder(nav.next)[0] }}) ›</a>{% endif %}
+  {% if nav.prev_todo %}<a href="{{ url_for('folder', key=nav.prev_todo) }}">« Previous unreviewed</a>{% endif %}
+  {% if nav.next_todo %}<a href="{{ url_for('folder', key=nav.next_todo) }}">Next unreviewed »</a>{% endif %}
+</nav>
+<h1>{{ when }} <span class="event">{{ event }}</span>
+  {% if info.status and info.status != 'reviewed' %}<span class="pill {{ 'warn' if info.status != 'new' else '' }}">{{ info.status }}</span>{% endif %}</h1>
 <p class="row muted">
   {{ info.moments }} moments · {{ info.photos }} photos{% if info.videos %} · 🎬 {{ info.videos }} video{{ "" if info.videos == 1 else "s" }}{% endif %}
   {% if info.day %}
     {% if info.reviewed %}
-      {{ post(url_for('reviewed', day=info.day), "✓ Reviewed", "done") }}
+      {{ post(url_for('reviewed', day=info.day), "✓ Reviewed", "done", title="Click to un-mark") }}
     {% else %}
       {{ post(url_for('reviewed', day=info.day), "Mark day reviewed") }}
       <form method="post" action="{{ url_for('reviewed', day=info.day) }}" class="inline">
@@ -16,6 +24,13 @@
         <input type="hidden" name="next" value="/">
         <button class="ok">Mark reviewed &amp; return to Library</button>
       </form>
+      {% if nav.next_todo %}
+      <form method="post" action="{{ url_for('reviewed', day=info.day) }}" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="next" value="{{ url_for('folder', key=nav.next_todo) }}">
+        <button class="ok">Mark reviewed &amp; next unreviewed »</button>
+      </form>
+      {% endif %}
     {% endif %}
   {% endif %}
 </p>
@@ -51,9 +66,17 @@
             onclick="this.form.dataset.action = 'combine'">Combine selected moments</button>
   </form>
   <div class="grid zoomable-grid day-photos" id="day-photos" data-photo-mode="fit">{% for p in photos %}
-    <div class="day-photo" data-people='{{ photo_people.get(p.sha256, [])|tojson }}'
+    <div class="day-photo" id="m-{{ p.moment_id }}" data-people='{{ photo_people.get(p.sha256, [])|tojson }}'
          data-close-call="{{ 'true' if p.close_call else 'false' }}" data-favorite="{{ 'true' if p.favorite else 'false' }}">
       <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulkdel"> select</label>{{ card(p) }}
+      {% if p.is_best %}
+      <form method="post" action="{{ url_for('pin_moment', moment_id=p.moment_id) }}" class="pin-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="next" value="{{ request.path }}#m-{{ p.moment_id }}">
+        <label class="tick"><input type="checkbox" name="pinned" value="1" onchange="this.form.submit()"
+          {% if p.moment_id in pinned %}checked{% endif %}> show on Library</label>
+      </form>
+      {% endif %}
     </div>
   {% endfor %}</div>
   <p class="muted small" id="day-filter-empty" hidden>No photos match the selected filters.</p>
