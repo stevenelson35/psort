@@ -148,3 +148,15 @@ def test_combining_pinned_favorite_moments_keeps_one_pin_and_labels_the_alternat
     page = text(ui.get(DAY_URL))
     assert page.count('data-alternate="true"') == 1  # the other favorite, shown only with the Favorites filter
     assert "favorite alternate" in page
+
+
+def test_starring_a_photo_pins_its_moment_and_unstarring_keeps_the_pin(ui, tmp_path):
+    best = db(tmp_path).execute(
+        "SELECT sha256, moment_id FROM photos WHERE substr(library_path, 6, 10) = ? AND is_best = 1 LIMIT 1",
+        (DAY,)).fetchone()
+    pinned = lambda: {r[0] for r in db(tmp_path).execute("SELECT moment_id FROM library_pins")}  # noqa: E731
+    assert best["moment_id"] not in pinned()
+    ui.post_ok(f"/photo/{best['sha256']}/favorite")
+    assert best["moment_id"] in pinned()
+    ui.post_ok(f"/photo/{best['sha256']}/favorite")  # un-star
+    assert best["moment_id"] in pinned()

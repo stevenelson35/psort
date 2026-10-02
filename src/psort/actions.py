@@ -246,11 +246,16 @@ def set_pin(conn: sqlite3.Connection, moment_id: str, pinned: bool) -> None:
 
 def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
     """Star / unstar a photo; its highlights/ copy appears or disappears to match. Starring a shot
-    (without an explicit pick already pinned) also makes it its moment's best, if it wasn't."""
+    (without an explicit pick already pinned) also makes it its moment's best, if it wasn't, and
+    shows the moment on the Library page. Un-starring leaves that Library setting alone."""
     try:
         now = highlights.toggle_favorite(conn, sha)
     except highlights.HighlightError as e:
         raise ActionError(str(e)) from e
+    if now:
+        conn.execute("INSERT OR IGNORE INTO library_pins (moment_id) SELECT moment_id FROM photos WHERE sha256 = ?",
+                     (sha,))
+        conn.commit()
     refresh(cfg, conn)
     return now
 
