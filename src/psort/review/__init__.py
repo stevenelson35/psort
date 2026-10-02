@@ -15,6 +15,7 @@ from PIL import Image
 from werkzeug.exceptions import HTTPException
 
 from .. import actions
+from .. import backup as backup_mod
 from .. import export as export_mod
 from .. import events as events_mod
 from .. import faces as faces_mod
@@ -30,6 +31,7 @@ from ..winpath import windows_path
 THUMB_SIZES = {320, 1280}
 GROUP_PAGE_LIMIT = 400  # faces shown at once on a group's page
 MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 MB) is rewritten
+BACKUP_DIR = Path.home() / "psort-backups"  # where `psort backup` / the Backup page save archives
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -130,7 +132,8 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     def act(fn, *args, default="/"):
         try:
             fn(*args)
-        except (actions.ActionError, events_mod.EventError, faces_mod.FaceError, FileExistsError) as e:
+        except (actions.ActionError, events_mod.EventError, faces_mod.FaceError, FileExistsError,
+                backup_mod.BackupError) as e:
             flash(str(e), "error")
         return back(default)
 
@@ -178,8 +181,8 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         prefix = key + "/"
         photos = db().execute(
             f"""SELECT {CARD_COLUMNS} FROM photos p
-                WHERE substr(p.library_path, 1, ?) = ? AND instr(p.library_path, '/_alternates/') = 0
-                  AND p.is_best = 1
+                WHERE substr(p.library_path, 1, ?) = ? AND p.duplicate_of IS NULL
+                  AND (p.is_best = 1 OR EXISTS (SELECT 1 FROM favorites fav WHERE fav.sha256 = p.sha256))
                 ORDER BY p.taken_at, p.name""",
             (len(prefix), prefix),
         ).fetchall()
@@ -206,7 +209,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     def moment(moment_id):
         shots = db().execute(
             f"""SELECT {CARD_COLUMNS}, p.sharpness, p.exposure, p.faces, p.score, p.user_best, p.taken_at,
-                       p.date_source, p.camera, p.width, p.height
+                       p.date_source, p.camera
                 FROM photos p WHERE p.moment_id = ? ORDER BY p.is_best DESC, p.score DESC""",
             (moment_id,),
         ).fetchall()
@@ -401,6 +404,20 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         def run():
             flash(f"Deleted {actions.empty_trash(cfg, db())} photo(s) for good.", "ok")
         return act(run, default="/trash")
+
+    @app.get("/backup")
+    def backup_page():
+        return render_template(
+            "backup.html", config_dir=config_path.parent, state_dir=cfg.state_dir, out_dir=BACKUP_DIR,
+            backups=backup_mod.list_backups(BACKUP_DIR),
+        )
+
+    @app.post("/backup")
+    def backup_create():
+        def run():
+            archive = backup_mod.create_backup(config_path, cfg, BACKUP_DIR, bool(request.form.get("include_caches")))
+            flash(f"Backed up to {archive}", "ok")
+        return act(run, default=url_for("backup_page"))
 
     @app.get("/trash/thumb/<sha>.jpg")
     def trash_thumb(sha):
@@ -621,7 +638,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
 
 
 # Columns every photo card needs; `p` is photos.
-CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.close_call,
+CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.close_call, p.width, p.height,
     (SELECT COUNT(*) FROM photos m WHERE m.moment_id = p.moment_id AND m.duplicate_of IS NULL) AS shots,
     (SELECT COUNT(*) FROM photos m WHERE m.moment_id = p.moment_id AND m.duplicate_of IS NOT NULL) AS copies,
     p.duplicate_of,

@@ -21,7 +21,7 @@ During `psort run`, each input is announced as `Inbox 1/N`, `Inbox 2/N`, and so 
 
 ## Move to another computer
 
-The database is essential to preserving analysis and review decisions. The library's `.psort/manifest.json` is not a replacement: it omits face embeddings and other local state. To continue without re-analyzing photos:
+The database is essential to preserving analysis and review decisions. The library's `.psort/manifest.json` is not a replacement: it omits face embeddings and other local state. `uv run psort backup` (or the **Backup** page in the review UI) archives the config directory and the state directory for you in one step; to continue without re-analyzing photos:
 
 1. Stop psort on the old computer. Copy the complete configured state directory (normally `~/.local/share/psort/`, including `psort.db` and `models/`), the library, every input directory, and the separate `videos/`, `unsorted_files/`, and `highlights/` directories if present.
 2. Install Python 3.12 or newer, install `uv`, clone this repository, and run `uv sync`.
@@ -40,9 +40,11 @@ uv run psort verify         # are all configured input directories safely copied
 ```
 
 In the review UI you can:
-- pick best shots and resolve close calls
+- pick best shots and resolve close calls, or combine/split moments by hand when bursts should (or shouldn't) be grouped together
 - name events and faces, and fix dates, one photo at a time or many at once
-- star favorites and delete junk (it goes to a trash you can restore from)
+- identify, correct, or ignore a detected face right from its photo, not just from the Faces pages
+- star favorites (preferred automatically as a moment's best shot over the plain top score) and delete junk (it goes to a trash you can restore from)
+- filter day pages by person, close call, or no identified people, and zoom photo panels larger or smaller
 - write blog posts in the Post tray, then Preview, Dry run, or Publish
 
 ## Other commands
@@ -56,7 +58,9 @@ uv run psort empty-trash            # permanently delete trashed photos
 uv run psort highlights             # sync highlights/ with ★ favorites (also part of run)
 uv run psort close-calls            # list near-tie moments
 uv run psort events | events name <id> <name> [--through <id>] | events unname <name>
-uv run psort faces list | crops | label <name> --group <id> | unlabel --face <id>
+uv run psort faces list | crops | label <name> --group <id> | unlabel --face <id> | ignore --face <id> | unignore --face <id>
+uv run psort publish-browse [--dry-run]    # publish favorites + manifest for the browse page, with a CORS rule for the blog origin
+uv run psort backup [--out DIR] [--include-caches]    # archive the config + state directories (DB, face models) to a dated .tar.gz
 ```
 
 psort never writes to the inbox, and every inbox file ends up copied somewhere, except OS cache files. Delete a batch yourself once `psort verify` says it's safe.

@@ -31,6 +31,7 @@
       <button type="button" class="filter-chip" data-day-filter="person" data-filter-value="{{ person }}" aria-pressed="false">{{ person }}</button>
     {% endfor %}
     <button type="button" class="filter-chip" data-day-filter="close" aria-pressed="false">Close calls</button>
+    <button type="button" class="filter-chip" data-day-filter="favorite" aria-pressed="false">Favorites</button>
     <button type="button" class="filter-chip" data-day-filter="unidentified" aria-pressed="false">No identified people</button>
     <button type="button" id="toggle-day-filters">Toggle all filters</button>
     <span class="muted small" id="day-filter-count" aria-live="polite"></span>
@@ -51,7 +52,7 @@
   </form>
   <div class="grid zoomable-grid day-photos" id="day-photos" data-photo-mode="fit">{% for p in photos %}
     <div class="day-photo" data-people='{{ photo_people.get(p.sha256, [])|tojson }}'
-         data-close-call="{{ 'true' if p.close_call else 'false' }}">
+         data-close-call="{{ 'true' if p.close_call else 'false' }}" data-favorite="{{ 'true' if p.favorite else 'false' }}">
       <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulkdel"> select</label>{{ card(p) }}
     </div>
   {% endfor %}</div>
@@ -83,6 +84,7 @@
           const show = allFilter.getAttribute("aria-pressed") === "true" || active.some(button => {
             if (button.dataset.dayFilter === "person") return names.includes(button.dataset.filterValue);
             if (button.dataset.dayFilter === "close") return card.dataset.closeCall === "true";
+            if (button.dataset.dayFilter === "favorite") return card.dataset.favorite === "true";
             return names.length === 0;
           });
           card.hidden = !show;

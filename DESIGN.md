@@ -112,6 +112,7 @@ input directories ─[1 scan]─► state DB ─[2 group moments]─► ─[3 sc
 
 - A **moment** is a burst of near-identical shots from one camera. Consecutive photos join when they're taken within `burst_gap_seconds` (10) of each other **and** their perceptual hashes are within `phash_threshold` (10 of 64 bits).
 - **Moment ID** = the content hash of its earliest photo, which stays stable as later batches add photos.
+- **Manual groups:** best-shot selections on a day page can combine separate moments (**Combine selected moments**); selected shots on a moment page can be split out into a new moment (**Move selected to a new moment**). Per-photo overrides are stored in `moment_overrides` and reapplied after every automatic cluster pass, so these edits survive `psort run`.
 
 ### 5.3 Score
 
@@ -123,8 +124,10 @@ Scores are compared only **within a moment**. Weights live in `[weights]`:
 | Exposure (0.2) | Clipped shadows and highlights, and distance from mid-tone |
 | Faces (0.15) | Number of faces found by YuNet |
 | Face sharpness (0.15) | Sharpness of the face regions |
+| Resolution (0.1) | Pixel count, relative to the largest shot in the moment |
 
 - The highest score is the **best** shot unless you've picked another. Your pick always wins.
+- **Resolution** breaks ties (or near-ties) toward the higher-resolution shot when two photos in a moment otherwise look alike but one has fewer pixels (e.g. a screenshot or a resized copy that wasn't close enough to be flagged a visual duplicate). Photo cards also show each shot's width × height, so you can tell them apart by eye too.
 - **A favorite is preferred next:** if no shot in the moment is explicitly picked, but one is already starred (☆), it becomes the best shot instead of the plain top-scoring one (highest-scoring starred shot, if more than one is starred). Starring a shot re-scores its moment immediately, so this takes effect right away, not just on the next `psort run`. An explicit pick still always wins over a favorite.
 - **Tuning:** psort scores only sharpness, exposure and faces — not framing, composition or subject distance/detail. If the automatic pick is consistently the technically sharper but less well-framed shot, lowering `sharpness` and raising `exposure` in `[weights]` (they don't need to sum to 1) shifts the balance; there's no "framing" signal to weight today, so close calls involving framing differences still need a manual pick.
 - **Close calls:** when the runner-up is within `close_call_margin` (5%) of the best, the moment is flagged for review. The flag clears once you pick (or once a favorite settles it).
@@ -240,9 +243,9 @@ a_library/
 - **Errors:** Flask runs with debug off, so an unexpected exception would normally just show a bare "Internal Server Error." A global handler instead logs the full traceback to the terminal running `psort review` and shows a short message (with the exception type and text) as a flash on the page you were on, or an error page for a broken link.
 - **Pages:**
   - **Library:** years → days and events, with counts, close calls, 🎬 and ✓ reviewed, plus an overall **progress bar** (days and photos reviewed vs. the whole library).
-  - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked**, 🎬 videos, **Mark day reviewed**, and **Mark reviewed & return to Library**. Photo cards default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame. Filter the visible picks by identified person, close calls, or photos with no identified people; **All** resets the view and **Toggle all filters** selects or clears all specific filters.
+  - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked** or **Combine selected moments**, 🎬 videos, **Mark day reviewed**, and **Mark reviewed & return to Library**. Photo cards show each shot's width × height, and default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame. Filter the visible picks by identified person, close calls, favorites, or photos with no identified people; **All** resets the view and **Toggle all filters** selects or clears all specific filters. The **Favorites** filter also surfaces a moment's favorited shot even when it isn't that moment's current best (e.g. you starred an alternate after someone else's explicit pick already won). Zoom controls resize photo panels and reflow the grid; sizes are remembered per view.
   - **Reviewed days un-mark themselves:** if `psort run` copies a genuinely new photo (not a re-copy) into a day already marked reviewed, that day's `reviewed` row is dropped, so it shows as to-do again.
-  - **Moment:** every shot with its score breakdown:
+  - **Moment:** every shot with its score breakdown; select shots and **Move selected to a new moment** to split them:
     - **Make this the best** / let psort pick again
     - ☆, tray, tags, fix date, 🗑 delete
     - Detected faces beside their photo: **Not <name>**, **Ignore face**, **Un-ignore face**, and add/change identification
@@ -252,6 +255,7 @@ a_library/
 - **Clicks stay fast:** a decision re-scores in memory and moves only the files it affects. Files that aren't moving are trusted from the database rather than re-checked on disk. Checking all ~10,000 library files on OneDrive took about 2 minutes per click; now a click takes about 0.2 s. `psort run` still verifies every file.
 - **`manifest.json`** (about 10 MB) is written in the background 4 s after the last change, and again when the review page stops.
 - **Thumbnails, posters and face crops** are cached in the state folder, named by content, so they're never stale.
+- **Backup page:** archives the config directory and the state directory (database, face models) into a dated, commit-tagged `.tar.gz` under `~/psort-backups/` (same as `psort backup`, §9). Thumbnail/face-crop/poster caches are skipped by default since they're regenerated automatically.
 
 ## 7. Export only (for `blogupdate.html`)
 
@@ -309,6 +313,8 @@ Run with `uv run psort …` from the repo.
 | `reconcile [--apply]` | Repairs records after hand edits (§5.11) |
 | `empty-trash` | Permanently deletes trashed photos |
 | `fetch-models` | Downloads the face models if missing |
+| `backup [--out DIR] [--include-caches]` | Archives the config directory and the state directory (DB, face models) into a dated, commit-tagged `.tar.gz`; `--out` defaults to `~/psort-backups/` (§12). Also available as a **Backup** page in the review UI |
+| `publish-browse [--dry-run] [--remote-dir]` | Publishes every favorite plus a JSON manifest for the browse page (DESIGN.md §12 backlog), with a CORS rule for the blog's origin |
 
 ## 10. Tech Stack
 
@@ -344,6 +350,9 @@ Run with `uv run psort …` from the repo.
 - **Blog publishing** is built, but **`psort blog-login` hasn't been run with the real password yet**, so nothing has been published to the live blog through psort. Suggest a Dry run first.
 - **The user's review work** (closes, faces, events, undated) is ongoing. There are 15 Disney photos dated only to "April 2016."
 - **2026-09-27:** added ignoring faces (§5.7), auto-un-review of days when new photos land in them, and a library-wide review progress bar (§6).
+- **2026-09-29:** multiple ordered `[paths.inboxes]` input roots (§2), per-inbox scan/processing progress during `psort run` (§4.1), and `psort publish-browse` now writes a CORS rule so the blog origin can fetch its manifest.
+- **2026-09-30 to 2026-10-01:** day pages got Fit/Fill photo framing, person/close-call/unidentified filters, and a zoom control for panel size (also on Favorites/Undated/Trash/moment pages); moments can be combined (day page) or split (moment page) by hand, persisted in `moment_overrides` and reapplied after every recluster; detected faces can be identified/corrected/ignored right from a photo on its moment page, not just from the Faces pages; an unexpected review-UI error now logs a traceback to the terminal and shows a useful message instead of a bare 500; and a starred favorite is now preferred over the plain top score when psort picks a moment's best shot (§5.3), including right after combining moments.
+- **2026-10-01 (later):** day pages show each photo's width × height and a **Favorites** filter (surfaces a moment's favorited shot even when it's not that moment's current best); scoring gained a **Resolution** weight so a higher-pixel-count shot wins close/ambiguous comparisons; and `psort backup` / a **Backup** page in the review UI archive the config and state directories into a dated, commit-tagged `.tar.gz` (§9, §6).
 
 ### Backlog and ideas (not built)
 - **People filter** on day pages and in search, beyond Favorites. Optionally, favor shots where family faces are sharp.
@@ -366,24 +375,26 @@ Run with `uv run psort …` from the repo.
 | `ingest.py` | Scan, classify (`kind_of`), photos/videos/Live clips/Rich packages/other files, settle and retry logic, folder re-dating |
 | `imaging.py` | Hashing, `load_small`, `upright` (safe EXIF rotation), `analyze`, YuNet wrapper |
 | `dates.py` | EXIF/filename/folder date parsing; `UNCERTAIN` / `NO_TIME` date sources |
-| `moments.py` | Clustering, visual duplicates, scoring, close calls |
+| `moments.py` | Clustering, visual duplicates, scoring (favorite- and user-pick-aware), close calls |
 | `library.py` | Names, desired paths, curate (copy/move), companions (`_sync`), verify, manifest |
 | `videos.py` | Video probing (mvhd, OpenCV), Live Photo detection, video layout and curate, posters |
 | `rich.py` | Rich Capture package reading and frame extraction |
 | `events.py` | Event suggestions and named ranges; `slugify` |
-| `faces.py` | Face scan, grouping (kNN + connected components), label/unlabel with rejections, crops |
+| `faces.py` | Face scan, grouping (kNN + connected components), label/unlabel/ignore with rejections, crops |
 | `highlights.py` | Favorites and the `highlights/` sync |
 | `trash.py` | Delete/restore/empty trash, companions |
 | `reconcile.py` | Repairing records after hand edits |
 | `export.py` | Web JPEG rendering (allowlisted metadata) and outbox export |
 | `blog.py` | Composer draft, post rendering, responsive sizes, FTPS uploader, git publish |
-| `actions.py` | Review decisions shared by UI and CLI; `refresh()` re-scores, curates, syncs highlights, writes the manifest |
+| `actions.py` | Review decisions shared by UI and CLI; `refresh()` re-scores, curates, syncs highlights, writes the manifest; `combine_moments`/`split_moment` edit `moment_overrides` |
 | `progress.py` | Step/overall progress display |
+| `backup.py` | Archives the config and state directories into a dated, commit-tagged `.tar.gz` |
 | `review/` | Flask app (`__init__.py`), Jinja templates, `static/style.css` |
 
 ### Data model (SQLite, `~/.local/share/psort/psort.db`)
-- **`sources`:** every inbox file (path relative to the inbox, size, mtime, status `image|video|livephoto|rich|sidecar|other|error|junk`, reason, sha256).
+- **`sources`:** every inbox file (path relative to its configured input root — root 0 unprefixed, later roots as `_psort_inbox_N/…` — size, mtime, status `image|video|livephoto|rich|sidecar|other|error|junk`, reason, sha256).
 - **`photos`:** one row per unique photo. Holds its date and `date_source`, analysis values, `moment_id`, `score`, `is_best`/`user_best`, `close_call`, `duplicate_of`, permanent `name`, `library_path` and `faces_scanned`.
+- **`moment_overrides`:** manual `sha256 → moment_id` pins from combining/splitting moments by hand; reapplied after every automatic `cluster()` pass so they survive `psort run`.
 - **Other files:**
   - `videos`, `live_clips` (with `photo_path`), `rich_packages` (with `photo_path`), `derived_frames` (frames unpacked from packages), `other_files`
   - each has a `library_path` relative to its root

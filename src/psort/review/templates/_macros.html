@@ -28,6 +28,7 @@
       {{ post(url_for('favorite', sha=p.sha256), "★" if p.favorite else "☆", "star on" if p.favorite else "star",
               title="Remove from favorites" if p.favorite else "Add to favorites") }}
       <span class="name">{{ p.name }}</span>
+      {% if p.width and p.height %}<span class="muted dims">{{ p.width }} × {{ p.height }}</span>{% endif %}
       {% if p.shots > 1 %}<span class="pill">{{ p.shots }} shots</span>{% endif %}
       {% if p.copies %}<span class="pill" title="Same picture saved more than once; extra copies are in _duplicates">+{{ p.copies }} duplicate{{ "" if p.copies == 1 else "s" }}</span>{% endif %}
       {% if p.close_call %}<span class="pill warn">close call</span>{% endif %}

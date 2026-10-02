@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Backup{% endblock %}
+{% block content %}
+<h1>Backup</h1>
+<p class="muted">Archives your config (<code>{{ config_dir }}</code>) and state (<code>{{ state_dir }}</code> —
+  the database, face models and other review state) into one file, named with the date and the psort
+  commit that made it, so you can tell which version of psort it came from. Thumbnail, face-crop and
+  poster caches are skipped by default (they're regenerated automatically); tick below to include them
+  anyway. This isn't a substitute for backing up the library itself.</p>
+<form method="post" action="{{ url_for('backup_create') }}" class="row">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label><input type="checkbox" name="include_caches"> include thumbnail/face-crop/poster caches (much bigger)</label>
+  <button class="ok">Create backup now</button>
+</form>
+<p class="muted small">Saved to <code>{{ out_dir }}</code>. This can take a while for a large library —
+  the page will wait for it to finish.</p>
+<h2>Existing backups</h2>
+{% if backups %}
+  <ul>
+    {% for b in backups %}<li><code>{{ b.name }}</code> <span class="muted">{{ b.size }} · {{ b.created }}</span></li>{% endfor %}
+  </ul>
+{% else %}
+  <p>No backups yet.</p>
+{% endif %}
+{% endblock %}

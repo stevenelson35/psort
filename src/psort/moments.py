@@ -137,6 +137,7 @@ def score(cfg: Config, conn: sqlite3.Connection) -> None:
         max_sharp = max(m["sharpness"] for m in members) or 1.0
         max_faces = max(m["faces"] or 0 for m in members)
         max_face_sharp = max(m["face_sharpness"] or 0.0 for m in members)
+        max_pixels = max((m["width"] or 0) * (m["height"] or 0) for m in members) or 1
 
         scores = {}
         for m in members:
@@ -145,6 +146,7 @@ def score(cfg: Config, conn: sqlite3.Connection) -> None:
                 s += w.faces * (m["faces"] or 0) / max_faces
             if max_face_sharp:
                 s += w.face_sharpness * (m["face_sharpness"] or 0.0) / max_face_sharp
+            s += w.resolution * ((m["width"] or 0) * (m["height"] or 0)) / max_pixels
             scores[m["sha256"]] = s
 
         # A pick of a copy counts as a pick of the copy it duplicates. If that pointer is stale

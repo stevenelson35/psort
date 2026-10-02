@@ -91,6 +91,27 @@ def fetch_models() -> None:
     _download_models(cfg)
 
 
+@app.command("backup")
+def backup_cmd(
+    out: Annotated[Path, typer.Option(help="Folder to save the backup archive in.")] = Path.home() / "psort-backups",
+    include_caches: Annotated[
+        bool, typer.Option(help="Also include thumbnail/face-crop/poster caches (regenerated automatically; much bigger).")
+    ] = False,
+) -> None:
+    """Archive the config directory and the state directory (database, face models) into one
+    dated, commit-tagged .tar.gz, so you can restore psort's review state after a disk loss or a
+    move to another computer without redoing any analysis."""
+    from . import backup as backup_mod
+
+    cfg, _ = _open()
+    try:
+        archive = backup_mod.create_backup(_config_path, cfg, out.expanduser().resolve(), include_caches)
+    except backup_mod.BackupError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    typer.echo(f"Backed up to {archive}")
+
+
 def _download_models(cfg: Config) -> None:
     for path, url in cfg.models:
         if path.exists():

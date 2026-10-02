@@ -21,6 +21,7 @@ class Weights:
     exposure: float = 0.2
     faces: float = 0.15
     face_sharpness: float = 0.15
+    resolution: float = 0.1
 
 
 @dataclass
@@ -211,5 +212,8 @@ sharpness = {w.sharpness}
 exposure = {w.exposure}
 faces = {w.faces}
 face_sharpness = {w.face_sharpness}
+# Prefers more pixels when otherwise-similar shots differ in resolution (e.g. a screenshot or a
+# resized copy mixed into the same burst).
+resolution = {w.resolution}
 """
     )

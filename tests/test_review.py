@@ -62,6 +62,47 @@ def test_pages_render(ui, tmp_path):
     assert ui.get("/folder/2026/nope").status_code == 404
 
 
+def test_backup_page_and_create(ui, tmp_path, monkeypatch):
+    import tarfile
+
+    import psort.review as review_mod
+
+    out_dir = tmp_path / "backups"
+    monkeypatch.setattr(review_mod, "BACKUP_DIR", out_dir)
+
+    page = text(ui.get("/backup"))
+    assert "No backups yet" in page
+
+    response = ui.post_ok("/backup", next="/backup")
+    assert response.status_code == 302
+    archives = list(out_dir.glob("psort-backup-*.tar.gz"))
+    assert len(archives) == 1
+    with tarfile.open(archives[0]) as tar:
+        names = tar.getnames()
+    assert "state/psort.db" in names
+    assert not any(n.startswith("state/thumbs/") for n in names)
+
+    page = text(ui.get("/backup"))
+    assert archives[0].name in page
+
+
+def test_day_page_shows_favorited_alternates_via_favorites_filter(ui, tmp_path):
+    burst = sha_of(tmp_path, "20260703_145634")  # the automatic/explicit best of its moment
+    alternate = sha_of(tmp_path, "20260703_145636")["sha256"]  # a different shot, same moment
+
+    # Pin the explicit best first, so favoriting the alternate doesn't just promote it to best.
+    ui.post_ok(f"/photo/{burst['sha256']}/best")
+    ui.post_ok(f"/photo/{alternate}/favorite")
+
+    day = text(ui.get("/folder/2026/2026-07-03"))
+    assert 'data-day-filter="favorite"' in day
+    assert f'data-favorite="true"' in day
+    assert "20260703_145636" in day  # now visible, even though it's not this moment's best
+    conn = db(tmp_path)
+    assert conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (alternate,)).fetchone()["is_best"] == 0
+    assert conn.execute("SELECT is_best FROM photos WHERE sha256 = ?", (burst["sha256"],)).fetchone()["is_best"] == 1
+
+
 def test_unexpected_errors_get_a_useful_message_instead_of_a_crash(ui, tmp_path, monkeypatch):
     import psort.actions as actions_mod
 
