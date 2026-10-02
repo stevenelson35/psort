@@ -61,10 +61,11 @@ def inbox_files(inbox: Path, under: Path | None = None):
 
 
 def configured_inbox_files(cfg: Config):
-    """Yield every input file with a stable DB key; root order is part of that key."""
+    """Yield every input file with a stable DB key; root order is part of that key. An inbox that
+    isn't there right now is skipped (nothing recorded from it is touched)."""
     for index, root in enumerate(cfg.input_roots):
         if not root.is_dir():
-            raise FileNotFoundError(f"Inbox {index + 1} not found: {root}")
+            continue
         for path, relative in inbox_files(root):
             yield path, source_key(index, relative)
 
@@ -178,6 +179,10 @@ def plan(cfg: Config, conn: sqlite3.Connection,
     files, pending = [], 0
     roots = cfg.input_roots
     for index, root in enumerate(roots):
+        if not root.is_dir():
+            if inbox_event:
+                inbox_event(f"Inbox {index + 1}/{len(roots)}: {root} — not found, skipped")
+            continue
         started = time.monotonic()
         root_files = list(inbox_files(root))
         root_pending = 0
@@ -204,9 +209,8 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
            inbox_event: Callable[[str], None] | None = None) -> IngestStats:
     """Record every inbox file. Every file except OS caches ends up copied somewhere: photos to
     the library, videos to videos/, Live Photo clips beside their photo, the rest to unsorted_files/."""
-    for index, root in enumerate(cfg.input_roots):
-        if not root.is_dir():
-            raise FileNotFoundError(f"Inbox {index + 1} not found: {root}")
+    if not any(root.is_dir() for root in cfg.input_roots):
+        raise FileNotFoundError("No inbox found: " + ", ".join(str(r) for r in cfg.input_roots))
     detector = FaceDetector.load(cfg.face_model)
     stats = IngestStats()
     siblings: dict[Path, dict[str, str]] = {}  # folder → {lowercase name: real name}, for Live Photo pairing
@@ -220,6 +224,10 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
 
     processed = 0
     for index, root in enumerate(cfg.input_roots):
+        if not root.is_dir():
+            if inbox_event:
+                inbox_event(f"Inbox {index + 1}/{len(cfg.input_roots)}: {root} — not found, skipped")
+            continue
         root_files = by_root.get(index, [])
         started = time.monotonic()
         root_pending = sum(

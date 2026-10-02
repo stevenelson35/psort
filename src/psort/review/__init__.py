@@ -1,6 +1,7 @@
 """Local review UI (DESIGN.md §6). Runs on 127.0.0.1 only; never exposed to the network."""
 
 import atexit
+import calendar as calendar_mod
 import os
 import secrets
 import threading
@@ -10,7 +11,7 @@ from datetime import date as calendar_date
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, abort, flash, g, redirect, render_template, request, send_file, url_for
+from flask import Flask, abort, flash, g, make_response, redirect, render_template, request, send_file, url_for
 from PIL import Image
 from werkzeug.exceptions import HTTPException
 
@@ -34,6 +35,8 @@ GROUP_PAGE_LIMIT = 400  # faces shown at once on a group's page
 MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 MB) is rewritten
 BACKUP_DIR = Path.home() / "psort-backups"  # where `psort backup` / the Backup page save archives
 MAX_DAY_THUMBS = 12  # pinned moment thumbnails shown per day on the Library page; the rest are counted
+MONTH_COVER = 6  # photos in a month's cover collage on the Library page
+LIBRARY_VIEWS = ("grouped", "list", "calendar")
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -162,10 +165,10 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
 
     @app.get("/")
     def index():
-        by_year = defaultdict(list)
+        view = request.args.get("view") or request.cookies.get("psort-library-view") or "grouped"
+        if view not in LIBRARY_VIEWS:
+            view = "grouped"
         all_folders = folders(db())
-        for f in all_folders:
-            by_year[f["year"]].append(f)
         stats = db().execute(
             "SELECT COUNT(*) AS photos, COUNT(DISTINCT moment_id) AS moments FROM photos WHERE library_path IS NOT NULL"
         ).fetchone()
@@ -184,8 +187,13 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
                WHERE p.library_path IS NOT NULL ORDER BY p.taken_at, p.name"""
         ):
             thumbs[folder_key(r["library_path"])].append(r)
-        return render_template("index.html", by_year=dict(sorted(by_year.items(), reverse=True)), stats=stats,
-                               progress=progress, thumbs=thumbs, max_thumbs=MAX_DAY_THUMBS)
+        overview = library_overview(db(), all_folders, with_calendar=view == "calendar")
+        resp = make_response(render_template(
+            "index.html", overview=overview, stats=stats, progress=progress, thumbs=thumbs,
+            max_thumbs=MAX_DAY_THUMBS, view=view, todo_count=progress["folders"] - progress["folders_done"]))
+        if request.args.get("view") in LIBRARY_VIEWS:
+            resp.set_cookie("psort-library-view", view, max_age=365 * 86400, samesite="Lax")
+        return resp
 
     @app.get("/folder/<path:key>")
     def folder(key):
@@ -659,6 +667,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         return send_file(out, mimetype="image/jpeg", max_age=86400)
 
     app.jinja_env.globals["pretty_folder"] = pretty_folder
+    app.jinja_env.globals["crumbs"] = crumbs
     app.jinja_env.globals["video_path"] = lambda rel: windows_path(cfg.videos / rel)
     app.jinja_env.globals["library_path"] = lambda rel: windows_path(cfg.library / rel)
     app.jinja_env.globals["highlight_path"] = lambda rel: windows_path(cfg.highlights / rel)
@@ -700,6 +709,96 @@ def pretty_folder(key: str) -> tuple[str, str]:
         return datetime.strptime(name[:7], "%Y-%m").strftime("%B %Y"), "day unknown"
     day, _, slug = name.partition("_")
     return datetime.strptime(day, "%Y-%m-%d").strftime("%a %-d %b %Y"), slug.replace("-", " ")
+
+
+def month_label(month: str) -> str:
+    return datetime.strptime(month, "%Y-%m").strftime("%B %Y")
+
+
+def crumbs(key: str) -> list[tuple[str, str]]:
+    """Breadcrumb links (label, url) from the Library down to a folder's month."""
+    out = [("Library", url_for("index"))]
+    if key == "_undated":
+        return out + [("Undated", url_for("index") + "#undated")]
+    year, month = key[:4], key.split("/")[1][:7]
+    return out + [(year, url_for("index") + f"#y{year}"), (month_label(month), url_for("index") + f"#m{month}")]
+
+
+def _covers(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]:
+    """Up to MONTH_COVER photos per month ('YYYY-MM'), one per moment: favorites first, then
+    moments shown on the Library page, then the highest-scoring best shots."""
+    pinned = {r[0] for r in conn.execute("SELECT moment_id FROM library_pins")}
+    ranked = defaultdict(list)
+    for r in conn.execute(
+        """SELECT p.sha256, p.name, p.moment_id, p.library_path, p.score, p.is_best,
+                  EXISTS (SELECT 1 FROM favorites f WHERE f.sha256 = p.sha256) AS fav
+           FROM photos p WHERE p.library_path IS NOT NULL AND p.duplicate_of IS NULL
+             AND (p.is_best = 1 OR EXISTS (SELECT 1 FROM favorites f WHERE f.sha256 = p.sha256))"""
+    ):
+        if r["library_path"].startswith("_undated/"):
+            continue
+        rank = (r["fav"], bool(r["is_best"] and r["moment_id"] in pinned), r["score"] or 0.0)
+        ranked[r["library_path"].split("/")[1][:7]].append((rank, r))
+    covers = {}
+    for month, rows in ranked.items():
+        rows.sort(key=lambda x: x[0], reverse=True)
+        seen, picks = set(), []
+        for _, r in rows:
+            if r["moment_id"] not in seen:
+                seen.add(r["moment_id"])
+                picks.append(r)
+                if len(picks) == MONTH_COVER:
+                    break
+        covers[month] = picks
+    return covers
+
+
+def library_overview(conn: sqlite3.Connection, all_folders: list[dict], with_calendar: bool = False) -> dict:
+    """Folders grouped into years (newest first) and months, with review counts and cover photos."""
+    covers = _covers(conn)
+    years: dict[str, dict] = {}
+    undated = None
+    for f in all_folders:
+        if f["key"] == "_undated":
+            undated = f
+            continue
+        year, month = f["key"][:4], f["key"].split("/")[1][:7]
+        y = years.setdefault(year, {"year": year, "months": {}})
+        y["months"].setdefault(month, {"month": month, "label": month_label(month), "folders": []})["folders"].append(f)
+    for y in years.values():
+        months = [y["months"][k] for k in sorted(y["months"])]
+        for m in months:
+            days = [f for f in m["folders"] if f["day"]]
+            m.update(photos=sum(f["photos"] for f in m["folders"]), days=len(days),
+                     done=sum(1 for f in days if f["reviewed"]), cover=covers.get(m["month"], []))
+            m["todo"] = m["days"] - m["done"]
+        y.update(months=months, photos=sum(m["photos"] for m in months), days=sum(m["days"] for m in months),
+                 done=sum(m["done"] for m in months), todo=sum(m["todo"] for m in months),
+                 cover=[m["cover"][0] for m in months if m["cover"]][:12])
+        if with_calendar:
+            y["calendar"] = _calendar(y["year"], all_folders)
+    return {"years": [years[k] for k in sorted(years, reverse=True)], "undated": undated}
+
+
+def _calendar(year: str, all_folders: list[dict]) -> list[dict]:
+    """12 month rows of day cells for the calendar view; a cell holds its day's first folder."""
+    by_day, unknown = {}, {}
+    for f in all_folders:
+        if f["key"][:4] != year:
+            continue
+        if f["day"]:
+            cell = by_day.setdefault(f["day"], {"key": f["key"], "photos": 0, "status": f["status"]})
+            cell["photos"] += f["photos"]
+        elif f["key"].endswith("_unknown-day"):
+            unknown[f["key"].split("/")[1][:7]] = f
+    rows = []
+    for mo in range(1, 13):
+        month = f"{year}-{mo:02d}"
+        length = calendar_mod.monthrange(int(year), mo)[1]
+        cells = [by_day.get(f"{month}-{d:02d}", {}) if d <= length else None for d in range(1, 32)]
+        rows.append({"month": month, "short": calendar_mod.month_abbr[mo], "cells": cells,
+                     "unknown": unknown.get(month)})
+    return rows
 
 
 def folders(conn: sqlite3.Connection) -> list[dict]:

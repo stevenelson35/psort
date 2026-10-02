@@ -1,11 +1,24 @@
 {# A POST button carrying the CSRF token and a return address. #}
-{% macro post(action, label, cls="", fields={}, title="") -%}
+{% macro post(action, label, cls="", fields={}, title="", next=None) -%}
   <form method="post" action="{{ action }}" class="inline">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+    <input type="hidden" name="next" value="{{ next or request.full_path.rstrip('?') }}">
     {% for k, v in fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
     <button class="{{ cls }}"{% if title %} title="{{ title }}"{% endif %}>{{ label }}</button>
   </form>
+{%- endmacro %}
+
+{% macro breadcrumb(key, tail=[]) -%}
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    {% for label, href in crumbs(key) %}<a href="{{ href }}">{{ label }}</a> › {% endfor %}
+    {% for label, href in tail %}{% if href %}<a href="{{ href }}">{{ label }}</a> › {% else %}<span>{{ label }}</span>{% endif %}{% endfor %}
+  </nav>
+{%- endmacro %}
+
+{% macro status_badge(status) -%}
+  {% if status == 'reviewed' %}<span class="status status-reviewed" title="Reviewed">✓</span>
+  {% elif status in ('pics added', 'moments updated') %}<span class="status status-changed" title="Changed since you reviewed it">{{ status }}</span>
+  {% elif status == 'new' %}<span class="status status-new" title="Not reviewed yet">•</span>{% endif %}
 {%- endmacro %}
 
 {% macro image_zoom(target, default=230, minimum=150, maximum=450, step=40) -%}

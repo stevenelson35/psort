@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
 {% block content %}
 <h1>Library</h1>
 <p class="muted">{{ stats.photos }} photos in {{ stats.moments }} moments.</p>
@@ -10,45 +11,158 @@
       {{ progress.photos_done }} / {{ progress.photos }} photos</span>
   </div>
 {% endif %}
-{% if not by_year %}<p>Nothing curated yet. Run <code>psort run</code>.</p>{% endif %}
-<label class="row muted"><input type="checkbox" id="show-day-thumbs" checked> Show day thumbnails
-  <span class="small">(tick "show on Library" under a moment on its day page to add one)</span></label>
-<div id="library" data-thumbs="on">
-{% for year, folders in by_year.items() %}
-  <h2>{{ year }}</h2>
-  <table class="folders">
-    {% for f in folders %}
-      {% set when, event = pretty_folder(f.key) %}
-      <tr>
-        <td>{% if f.reviewed %}<span class="done" title="Reviewed">✓</span>
-          {% elif f.status in ('pics added', 'moments updated') %}<span class="pill warn" title="Changed since you reviewed it">{{ f.status }}</span>{% endif %}</td>
-        <td><a href="{{ url_for('folder', key=f.key) }}">{{ when }}</a></td>
-        <td class="event">{{ event }}</td>
-        <td class="num">{{ f.moments }} moments</td>
-        <td class="num muted">{{ f.photos }} photos</td>
-        <td>{% if f.videos %}<span class="pill">🎬 {{ f.videos }}</span>{% endif %}</td>
-        <td>{% if f.close_calls %}<span class="pill warn">{{ f.close_calls }} close</span>{% endif %}</td>
-      </tr>
-      {% if thumbs.get(f.key) %}
-      {% set pics = thumbs[f.key] %}
-      <tr class="day-thumbs"><td></td><td colspan="6">
-        {% for t in pics[:max_thumbs] %}<a href="{{ url_for('moment', moment_id=t.moment_id) }}"><img
-          src="{{ url_for('thumb', sha=t.sha256, size=320) }}" loading="lazy" alt="{{ t.name }}" title="{{ t.name }}"></a>{% endfor %}
-        {% if pics|length > max_thumbs %}<a href="{{ url_for('folder', key=f.key) }}" class="muted">+{{ pics|length - max_thumbs }} more</a>{% endif %}
-      </td></tr>
-      {% endif %}
+{% if not overview.years and not overview.undated %}<p>Nothing curated yet. Run <code>psort run</code>.</p>{% endif %}
+<div class="toolbar">
+  <span class="btn-group" role="group" aria-label="Library view">
+    {% for v, label in [("grouped", "Years & months"), ("list", "List"), ("calendar", "Calendar")] %}
+      <a class="btn{% if view == v %} active{% endif %}" href="{{ url_for('index', view=v) }}"
+         {% if view == v %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
-  </table>
-{% endfor %}
+  </span>
+  <span class="btn-group">
+    <label><input type="checkbox" id="todo-only"> Only days needing review ({{ todo_count }})</label>
+    {% if view != "calendar" %}<label title='Tick "show on Library" under a moment on its day page to add one'>
+      <input type="checkbox" id="show-day-thumbs" checked> Show day thumbnails</label>{% endif %}
+  </span>
+  {% if view == "grouped" %}
+  <span class="btn-group">
+    <button type="button" class="btn" id="expand-all">Expand all</button>
+    <button type="button" class="btn" id="collapse-all">Collapse all</button>
+  </span>
+  {% endif %}
+</div>
+<nav class="jump-bar" aria-label="Jump to year">
+  {% for y in overview.years %}<a href="#y{{ y.year }}">{{ y.year }}</a>{% endfor %}
+  {% if overview.undated %}<a href="#undated">Undated</a>{% endif %}
+</nav>
+
+{% macro day_rows(f) -%}
+  {% set when, event = pretty_folder(f.key) %}
+  {% set todo = "yes" if f.day and not f.reviewed else "no" %}
+  <tr class="day-row" data-todo="{{ todo }}">
+    <td>{{ status_badge(f.status) }}</td>
+    <td><a href="{{ url_for('folder', key=f.key) }}">{{ when }}</a></td>
+    <td class="event">{{ event }}</td>
+    <td class="num">{{ f.moments }} moments</td>
+    <td class="num muted">{{ f.photos }} photos</td>
+    <td>{% if f.videos %}<span class="pill">🎬 {{ f.videos }}</span>{% endif %}</td>
+    <td>{% if f.close_calls %}<span class="pill warn">{{ f.close_calls }} close</span>{% endif %}</td>
+  </tr>
+  {% if thumbs.get(f.key) %}
+  {% set pics = thumbs[f.key] %}
+  <tr class="day-thumbs" data-todo="{{ todo }}"><td></td><td colspan="6">
+    {% for t in pics[:max_thumbs] %}<a href="{{ url_for('moment', moment_id=t.moment_id) }}"><img
+      src="{{ url_for('thumb', sha=t.sha256, size=320) }}" loading="lazy" alt="{{ t.name }}" title="{{ t.name }}"></a>{% endfor %}
+    {% if pics|length > max_thumbs %}<a href="{{ url_for('folder', key=f.key) }}" class="muted">+{{ pics|length - max_thumbs }} more</a>{% endif %}
+  </td></tr>
+  {% endif %}
+{%- endmacro %}
+
+{% macro collage(pics, cls="") -%}
+  {% if pics %}<span class="collage {{ cls }}">{% for t in pics %}<img src="{{ url_for('thumb', sha=t.sha256, size=320) }}"
+    loading="lazy" alt="{{ t.name }}" title="{{ t.name }}">{% endfor %}</span>{% endif %}
+{%- endmacro %}
+
+{% macro counts(g) -%}
+  <span class="muted small">{{ g.days }} day{{ "" if g.days == 1 else "s" }} · {{ g.photos }} photos</span>
+  {% if g.days %}<span class="mini-progress" title="{{ g.done }} / {{ g.days }} days reviewed">
+    <span style="width: {{ (100 * g.done / g.days)|round(1) }}%"></span></span>{% endif %}
+  {% if g.todo %}<span class="status status-new">{{ g.todo }} to review</span>
+  {% elif g.days %}<span class="status status-reviewed" title="All reviewed">✓</span>{% endif %}
+{%- endmacro %}
+
+<div id="library" data-thumbs="on" data-todo-only="off">
+{% if view == "grouped" %}
+  {% for y in overview.years %}
+  <details class="year-group" id="y{{ y.year }}" data-key="y{{ y.year }}" data-todo="{{ y.todo }}">
+    <summary><span class="group-title">{{ y.year }}</span> {{ counts(y) }} {{ collage(y.cover, "year-cover") }}</summary>
+    {% for m in y.months %}
+    <details class="month-group" id="m{{ m.month }}" data-key="m{{ m.month }}" data-todo="{{ m.todo }}">
+      <summary><span class="group-title">{{ m.label }}</span> {{ counts(m) }} {{ collage(m.cover) }}</summary>
+      <table class="folders">{% for f in m.folders %}{{ day_rows(f) }}{% endfor %}</table>
+    </details>
+    {% endfor %}
+  </details>
+  {% endfor %}
+  {% if overview.undated %}
+  <details class="year-group" id="undated" data-key="undated" data-todo="0">
+    <summary><span class="group-title">Undated</span> <span class="muted small">{{ overview.undated.photos }} photos</span></summary>
+    <table class="folders">{{ day_rows(overview.undated) }}</table>
+  </details>
+  {% endif %}
+
+{% elif view == "list" %}
+  {% for y in overview.years %}
+  <section id="y{{ y.year }}" data-todo="{{ y.todo }}">
+    <h2>{{ y.year }} {{ counts(y) }}</h2>
+    <table class="folders">
+      {% for m in y.months %}
+      <tr class="month-head" id="m{{ m.month }}" data-todo="{{ m.todo }}"><th colspan="7">{{ m.label }}</th></tr>
+      {% for f in m.folders %}{{ day_rows(f) }}{% endfor %}
+      {% endfor %}
+    </table>
+  </section>
+  {% endfor %}
+  {% if overview.undated %}
+  <section id="undated" data-todo="0"><h2>Undated</h2><table class="folders">{{ day_rows(overview.undated) }}</table></section>
+  {% endif %}
+
+{% else %}
+  <p class="muted small cal-legend">
+    <span class="cal-day cal-reviewed"></span> reviewed <span class="cal-day cal-changed"></span> changed since review
+    <span class="cal-day cal-new"></span> not reviewed yet <span class="cal-day cal-empty"></span> no photos</p>
+  {% for y in overview.years %}
+  <section class="cal-year" id="y{{ y.year }}" data-todo="{{ y.todo }}">
+    <h2>{{ y.year }} {{ counts(y) }}</h2>
+    <table class="calendar">
+      <tr><th></th>{% for d in range(1, 32) %}<th>{{ d }}</th>{% endfor %}<th></th></tr>
+      {% for m in y.calendar %}
+      <tr id="m{{ m.month }}"><th>{{ m.short }}</th>
+        {% for c in m.cells %}
+          {% if c is none %}<td></td>
+          {% elif c.key %}{% set css = "reviewed" if c.status == "reviewed" else ("new" if c.status == "new" else "changed") %}
+            <td><a class="cal-day cal-{{ css }}" href="{{ url_for('folder', key=c.key) }}"
+                   title="{{ pretty_folder(c.key)[0] }} · {{ c.photos }} photos · {{ c.status }}"></a></td>
+          {% else %}<td><span class="cal-day cal-empty"></span></td>{% endif %}
+        {% endfor %}
+        <td class="small">{% if m.unknown %}<a href="{{ url_for('folder', key=m.unknown.key) }}">+{{ m.unknown.photos }} day unknown</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endfor %}
+  {% if overview.undated %}<p id="undated"><a href="{{ url_for('folder', key='_undated') }}">Undated: {{ overview.undated.photos }} photos</a></p>{% endif %}
+{% endif %}
 </div>
 <script>
   (() => {
-    const box = document.getElementById("show-day-thumbs");
     const lib = document.getElementById("library");
-    const key = "psort-library-thumbs";
-    const apply = on => { lib.dataset.thumbs = on ? "on" : "off"; box.checked = on; };
-    apply(localStorage.getItem(key) !== "off");
-    box.addEventListener("change", () => { localStorage.setItem(key, box.checked ? "on" : "off"); apply(box.checked); });
+    const remember = (id, key, attr, byDefault) => {
+      const box = document.getElementById(id);
+      if (!box) return;
+      const apply = on => { lib.dataset[attr] = on ? "on" : "off"; box.checked = on; };
+      const stored = localStorage.getItem(key);
+      apply(stored === null ? byDefault : stored === "on");
+      box.addEventListener("change", () => { localStorage.setItem(key, box.checked ? "on" : "off"); apply(box.checked); });
+    };
+    remember("show-day-thumbs", "psort-library-thumbs", "thumbs", true);
+    remember("todo-only", "psort-library-todo-only", "todoOnly", false);
+
+    const groups = Array.from(document.querySelectorAll("details[data-key]"));
+    if (!groups.length) return;
+    const openKey = "psort-library-open";
+    const saved = new Set(JSON.parse(localStorage.getItem(openKey) || "[]"));
+    groups.forEach(d => { if (saved.has(d.dataset.key)) d.open = true; });
+    const save = () => localStorage.setItem(openKey, JSON.stringify(groups.filter(d => d.open).map(d => d.dataset.key)));
+    groups.forEach(d => d.addEventListener("toggle", save));
+    // Breadcrumb and "back to Library" links land on #yYYYY / #mYYYY-MM: open the way there.
+    const target = location.hash && document.getElementById(location.hash.slice(1));
+    for (let d = target; d; d = d.parentElement && d.parentElement.closest("details")) {
+      if (d.tagName === "DETAILS") d.open = true;
+    }
+    if (target) target.scrollIntoView();
+    document.getElementById("expand-all").addEventListener("click", () => groups.forEach(d => { d.open = true; }));
+    document.getElementById("collapse-all").addEventListener("click", () => groups.forEach(d => { d.open = false; }));
   })();
 </script>
 {% endblock %}

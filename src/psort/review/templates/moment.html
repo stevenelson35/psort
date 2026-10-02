@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% from "_macros.html" import image_zoom, post %}
+{% from "_macros.html" import breadcrumb, image_zoom, post %}
 {% block title %}{{ shots[0].name }}{% endblock %}
 {% block content %}
 {% set when, event = pretty_folder(folder_key) %}
-<p><a href="{{ url_for('folder', key=folder_key) }}">← {{ when }} {{ event }}</a></p>
+{{ breadcrumb(folder_key, [(when ~ (" · " ~ event if event else ""), url_for('folder', key=folder_key)), ("Moment", None)]) }}
 {% set real = shots|rejectattr("duplicate_of")|list %}
 <h1>{% if real|length > 1 %}Moment: {{ real|length }} shots{% else %}{{ shots[0].name }}{% endif %}
   {% if shots|length > real|length %}<span class="pill">+{{ shots|length - real|length }} duplicate{{ "" if shots|length - real|length == 1 else "s" }}</span>{% endif %}</h1>

@@ -226,3 +226,82 @@ def test_heic_copy_is_original_format(psort, tmp_path):
     psort("run")
     with Image.open(tmp_path / "library/2026/2026-07-05/20260705_120000.heic") as im:
         assert im.format == "HEIF"
+
+
+def _three_inboxes(psort, tmp_path, sample_inbox):
+    """Inbox 1 = sample_inbox, 2 and 3 hold one distinct photo each; all ingested."""
+    from conftest import save, scene
+
+    second, third = tmp_path / "second-inbox", tmp_path / "third-inbox"
+    save(second / "trip/IMG_5001.jpg", scene(81), "2026:08:01 10:00:00")
+    save(third / "trip/IMG_6001.jpg", scene(82), "2026:08:02 10:00:00")
+    (third / "trip/notes.txt").write_text("third inbox note")
+    psort("init", "--force", "--inbox", str(sample_inbox), "--inbox", str(second), "--inbox", str(third),
+          "--library", str(tmp_path / "library"), "--outbox", str(tmp_path / "outbox"),
+          "--state-dir", str(tmp_path / "state"), "--no-face-model")
+    config = tmp_path / "psort.toml"
+    config.write_text(config.read_text().replace("settle_seconds = 120", "settle_seconds = 0"))
+    psort("run")
+    return second, third
+
+
+def _snapshot(tmp_path):
+    conn = db(tmp_path)
+    return (sorted(r[0] for r in conn.execute("SELECT path FROM sources")),
+            sorted(r[0] for r in conn.execute("SELECT sha256 FROM photos")),
+            sorted(library_files(tmp_path / "library")))
+
+
+def test_missing_middle_inbox_is_skipped_and_later_inboxes_keep_their_keys(psort, tmp_path, sample_inbox):
+    import shutil
+    from conftest import save, scene
+
+    second, third = _three_inboxes(psort, tmp_path, sample_inbox)
+    before = _snapshot(tmp_path)
+    assert "_psort_inbox_2/trip/IMG_6001.jpg" in before[0] and "_psort_inbox_1/trip/IMG_5001.jpg" in before[0]
+
+    shutil.rmtree(second)  # directory removed, entry left in place
+    out = psort("run").output
+    assert "Inbox 2 not found, skipped" in out and "Inbox 2/3:" in out and "not found, skipped" in out
+    assert _snapshot(tmp_path) == before  # nothing forgotten, nothing re-keyed, nothing copied or removed
+
+    save(third / "trip/IMG_6002.jpg", scene(83), "2026:08:03 10:00:00")  # new file in the inbox AFTER the gap
+    psort("run")
+    sources, photos, _ = _snapshot(tmp_path)
+    assert "_psort_inbox_2/trip/IMG_6002.jpg" in sources
+    assert len(photos) == len(before[1]) + 1
+    assert not any(s.startswith("_psort_inbox_1/") and s not in before[0] for s in sources)
+    assert "Inbox 2 not found" in psort("verify").output  # verify checks the inboxes that are there
+
+
+def test_missing_first_inbox_is_skipped(psort, tmp_path, sample_inbox):
+    import shutil
+
+    _three_inboxes(psort, tmp_path, sample_inbox)
+    before = _snapshot(tmp_path)
+    shutil.rmtree(sample_inbox)
+    out = psort("run").output
+    assert "Inbox 1 not found, skipped" in out
+    assert _snapshot(tmp_path) == before
+    assert db(tmp_path).execute("SELECT COUNT(*) FROM photos").fetchone()[0] == len(before[1])
+
+
+def test_run_stops_only_when_every_inbox_is_missing(psort, tmp_path, sample_inbox):
+    import shutil
+
+    shutil.rmtree(sample_inbox)
+    assert "Inbox not found" in psort("run", expect=1).output
+
+
+def test_reordered_inboxes_never_duplicate_or_lose_photos(psort, tmp_path, sample_inbox):
+    """Swapping the order re-keys sources but photos are content-addressed: no dupes, nothing deleted."""
+    second, third = _three_inboxes(psort, tmp_path, sample_inbox)
+    before = _snapshot(tmp_path)
+    config = tmp_path / "psort.toml"
+    text = config.read_text()
+    swapped = text.replace(f'"{second}", "{third}"', f'"{third}", "{second}"')
+    assert swapped != text
+    config.write_text(swapped)
+    psort("run")
+    sources, photos, files = _snapshot(tmp_path)
+    assert photos == before[1] and files == before[2]

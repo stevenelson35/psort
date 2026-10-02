@@ -281,7 +281,7 @@ def test_tray_tags_reviewed(ui, tmp_path):
 
 def test_mark_reviewed_and_return(ui, tmp_path):
     day = text(ui.get("/folder/2026/2026-07-03"))
-    assert "Mark reviewed &amp; return to Library" in day
+    assert "✓ &amp; back to Library" in day and 'href="/#m2026-07"' in day
 
     response = ui.post_ok("/day/2026-07-03/reviewed", next="/")
     assert response.location == "/"

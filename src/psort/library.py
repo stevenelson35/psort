@@ -315,10 +315,11 @@ def verify(cfg: Config, conn: sqlite3.Connection, batch: str | None = None) -> l
                 selected.append((index, root, batch_dir))
         else:
             if not root.is_dir():
-                raise FileNotFoundError(f"Inbox {index + 1} not found: {root}")
+                continue  # not there right now: nothing in it to check
             selected.append((index, root, root))
     if not selected:
-        raise FileNotFoundError(f"No matching batch folder {batch!r} in configured inboxes")
+        raise FileNotFoundError(f"No matching batch folder {batch!r} in configured inboxes" if batch
+                                else "No inbox found: " + ", ".join(str(r) for r in cfg.input_roots))
 
     for index, root, under in selected:
         for path, relative in inbox_files(root, under):

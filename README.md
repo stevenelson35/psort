@@ -21,7 +21,14 @@ During `psort run`, each input is announced as `Inbox 1/N`, `Inbox 2/N`, and so 
 
 ## Move to another computer
 
-The database is essential to preserving analysis and review decisions. The library's `.psort/manifest.json` is not a replacement: it omits face embeddings and other local state. `uv run psort backup` (or the **Backup** page in the review UI) archives the config directory and the state directory for you in one step; to continue without re-analyzing photos:
+The database is essential to preserving analysis and review decisions. The library's `.psort/manifest.json` is not a replacement: it omits face embeddings and other local state. `uv run psort backup` (or the **Backup** page in the review UI) archives the config directory and the state directory for you in one step; to continue without re-analyzing photos. The quick way:
+
+1. On the old computer, `uv run psort backup` and copy the `psort-backup-*.tar.gz` (default folder `~/psort-backups/`) to the new one, along with the library, every input directory, and the `videos/`, `unsorted_files/` and `highlights/` directories.
+2. On the new computer, install Python 3.12+ and `uv`, clone this repository and run `uv sync`.
+3. Run `uv run psort restore psort-backup-….tar.gz --relocate`. It shows each path from the old `psort.toml` (each input directory in order, library, outbox, videos, unsorted, highlights, state directory), marks the ones that don't exist here, and lets you type a new path or press Enter to keep one. Nothing is overwritten unless you add `--force`, and then the old files are moved aside, not deleted. Use `uv run psort relocate` any time later to fix paths again.
+4. Run `uv run psort status`, then `uv run psort run` and `uv run psort verify`.
+
+Keep input directories in the same order (never delete or reorder entries): the database records each file's input by its position. If an input directory no longer exists, leave its entry in place; psort warns `Inbox N not found, skipped` and carries on with the others. The manual steps follow, if you'd rather not use `restore`:
 
 1. Stop psort on the old computer. Copy the complete configured state directory (normally `~/.local/share/psort/`, including `psort.db` and `models/`), the library, every input directory, and the separate `videos/`, `unsorted_files/`, and `highlights/` directories if present.
 2. Install Python 3.12 or newer, install `uv`, clone this repository, and run `uv sync`.
@@ -45,6 +52,8 @@ In the review UI you can:
 - identify, correct, or ignore a detected face right from its photo, not just from the Faces pages
 - star favorites (preferred automatically as a moment's best shot over the plain top score) and delete junk (it goes to a trash you can restore from)
 - filter day pages by person, close call, or no identified people, and zoom photo panels larger or smaller
+- browse the Library by years and months (collapsible, with photo collages), as a list, or as a calendar heatmap; jump by year, or show only days still needing review
+- move through days with a breadcrumb and one toolbar: previous/next day, previous/next unreviewed day, and "✓ & next/previous unreviewed" to finish a day and keep going
 - write blog posts in the Post tray, then Preview, Dry run, or Publish
 
 ## Other commands
@@ -59,6 +68,9 @@ uv run psort highlights             # sync highlights/ with ★ favorites (also 
 uv run psort close-calls            # list near-tie moments
 uv run psort events | events name <id> <name> [--through <id>] | events unname <name>
 uv run psort faces list | crops | label <name> --group <id> | unlabel --face <id> | ignore --face <id> | unignore --face <id>
+uv run psort backup [--out DIR]            # archive config + state (database, face models)
+uv run psort restore <archive> --relocate  # restore a backup on a new computer, fixing paths as you go
+uv run psort relocate                      # review/edit the paths in psort.toml
 uv run psort publish-browse [--dry-run]    # publish favorites + manifest for the browse page, with a CORS rule for the blog origin
 uv run psort backup [--out DIR] [--include-caches]    # archive the config + state directories (DB, face models) to a dated .tar.gz
 ```

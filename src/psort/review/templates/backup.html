@@ -15,6 +15,9 @@
 <p class="muted small">Saved to <code>{{ out_dir }}</code>. This can take a while for a large library —
   the page will wait for it to finish.</p>
 <h2>Existing backups</h2>
+<p class="muted small">To restore (or move to a new computer), close this page's server and run
+  <code>uv run psort restore &lt;archive&gt; --relocate</code> in a terminal. It can't be done from here:
+  a restore replaces the database this page is using.</p>
 {% if backups %}
   <ul>
     {% for b in backups %}<li><code>{{ b.name }}</code> <span class="muted">{{ b.size }} · {{ b.created }}</span></li>{% endfor %}

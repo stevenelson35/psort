@@ -1,38 +1,45 @@
 {% extends "base.html" %}
-{% from "_macros.html" import card, image_zoom, post, video_card %}
+{% from "_macros.html" import breadcrumb, card, image_zoom, post, video_card %}
 {% set when, event = pretty_folder(info.key) %}
+{% set library_url = url_for('index') ~ ('#undated' if info.key == '_undated' else '#m' ~ info.key.split('/')[1][:7]) %}
+{% macro nav_btn(key, label, what) -%}
+  {% if key %}<a class="btn" href="{{ url_for('folder', key=key) }}" title="{{ what }}: {{ pretty_folder(key)[0] }}">{{ label }}</a>
+  {%- else %}<span class="btn disabled" aria-disabled="true" title="No {{ what|lower }}">{{ label }}</span>{% endif %}
+{%- endmacro %}
 {% block title %}{{ when }}{% endblock %}
 {% block content %}
-<nav class="day-nav row" aria-label="Day navigation">
-  <a href="{{ url_for('index') }}">← Back to Library</a>
-  {% if nav.prev %}<a href="{{ url_for('folder', key=nav.prev) }}">‹ Previous day ({{ pretty_folder(nav.prev)[0] }})</a>{% endif %}
-  {% if nav.next %}<a href="{{ url_for('folder', key=nav.next) }}">Next day ({{ pretty_folder(nav.next)[0] }}) ›</a>{% endif %}
-  {% if nav.prev_todo %}<a href="{{ url_for('folder', key=nav.prev_todo) }}">« Previous unreviewed</a>{% endif %}
-  {% if nav.next_todo %}<a href="{{ url_for('folder', key=nav.next_todo) }}">Next unreviewed »</a>{% endif %}
-</nav>
+{{ breadcrumb(info.key, [(when ~ (" · " ~ event if event else ""), None)]) }}
+<div class="toolbar">
+  <span class="btn-group" role="group" aria-label="Navigate">
+    <a class="btn" href="{{ library_url }}">← Library</a>
+    {{ nav_btn(nav.prev, "‹ Previous day", "Previous day") }}
+    {{ nav_btn(nav.next, "Next day ›", "Next day") }}
+  </span>
+  <span class="btn-group" role="group" aria-label="Days not reviewed yet">
+    {{ nav_btn(nav.prev_todo, "« Previous unreviewed" ~ (" (" ~ pretty_folder(nav.prev_todo)[0] ~ ")" if nav.prev_todo else ""), "Previous unreviewed day") }}
+    {{ nav_btn(nav.next_todo, "Next unreviewed" ~ (" (" ~ pretty_folder(nav.next_todo)[0] ~ ")" if nav.next_todo else "") ~ " »", "Next unreviewed day") }}
+  </span>
+  {% if info.day %}
+  <span class="btn-group" role="group" aria-label="Finish this day">
+    {% if info.reviewed %}
+      {{ post(url_for('reviewed', day=info.day), "✓ Reviewed", "done", title="Reviewed. Click to un-mark.") }}
+    {% else %}
+      {{ post(url_for('reviewed', day=info.day), "✓ Mark day reviewed", "ok", title="Mark reviewed and stay here") }}
+      {{ post(url_for('reviewed', day=info.day), "✓ & back to Library", "ok", next=library_url,
+              title="Mark reviewed and return to this month in the Library") }}
+      {% if nav.prev_todo %}{{ post(url_for('reviewed', day=info.day), "✓ & « previous unreviewed", "ok",
+              next=url_for('folder', key=nav.prev_todo), title="Mark reviewed, then go back to " ~ pretty_folder(nav.prev_todo)[0]) }}{% endif %}
+      {% if nav.next_todo %}{{ post(url_for('reviewed', day=info.day), "✓ & next unreviewed »", "ok",
+              next=url_for('folder', key=nav.next_todo), title="Mark reviewed, then go on to " ~ pretty_folder(nav.next_todo)[0]) }}{% endif %}
+    {% endif %}
+  </span>
+  {% endif %}
+</div>
 <h1>{{ when }} <span class="event">{{ event }}</span>
-  {% if info.status and info.status != 'reviewed' %}<span class="pill {{ 'warn' if info.status != 'new' else '' }}">{{ info.status }}</span>{% endif %}</h1>
+  {% if info.status == 'new' %}<span class="status status-new">not reviewed yet</span>
+  {% elif info.status in ('pics added', 'moments updated') %}<span class="status status-changed">{{ info.status }}</span>{% endif %}</h1>
 <p class="row muted">
   {{ info.moments }} moments · {{ info.photos }} photos{% if info.videos %} · 🎬 {{ info.videos }} video{{ "" if info.videos == 1 else "s" }}{% endif %}
-  {% if info.day %}
-    {% if info.reviewed %}
-      {{ post(url_for('reviewed', day=info.day), "✓ Reviewed", "done", title="Click to un-mark") }}
-    {% else %}
-      {{ post(url_for('reviewed', day=info.day), "Mark day reviewed") }}
-      <form method="post" action="{{ url_for('reviewed', day=info.day) }}" class="inline">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="next" value="/">
-        <button class="ok">Mark reviewed &amp; return to Library</button>
-      </form>
-      {% if nav.next_todo %}
-      <form method="post" action="{{ url_for('reviewed', day=info.day) }}" class="inline">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="next" value="{{ url_for('folder', key=nav.next_todo) }}">
-        <button class="ok">Mark reviewed &amp; next unreviewed »</button>
-      </form>
-      {% endif %}
-    {% endif %}
-  {% endif %}
 </p>
 {% if videos %}
   <h2>🎬 {{ videos|length }} video{{ "" if videos|length == 1 else "s" }} from this day</h2>

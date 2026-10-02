@@ -9,6 +9,7 @@ from typing import Annotated
 
 import typer
 
+from . import backup as backup_mod
 from . import config as config_mod
 from . import events as events_mod
 from . import faces as faces_mod
@@ -106,8 +107,6 @@ def backup_cmd(
     """Archive the config directory and the state directory (database, face models) into one
     dated, commit-tagged .tar.gz, so you can restore psort's review state after a disk loss or a
     move to another computer without redoing any analysis."""
-    from . import backup as backup_mod
-
     cfg, _ = _open()
     try:
         archive = backup_mod.create_backup(_config_path, cfg, out.expanduser().resolve(), include_caches)
@@ -115,6 +114,70 @@ def backup_cmd(
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from e
     typer.echo(f"Backed up to {archive}")
+
+
+def _ask_path(label: str, current: str) -> str:
+    note = "" if Path(current).expanduser().is_dir() else typer.style("  (not found on this computer)", fg="yellow")
+    typer.echo(f"{label}: {current}{note}")
+    return typer.prompt("  new path (Enter keeps it)", default="", show_default=False)
+
+
+def _show_paths(cfg: Config) -> None:
+    for label, path, exists in backup_mod.path_report(cfg):
+        typer.echo(f"  {'ok     ' if exists else typer.style('missing', fg='yellow')} {label}: {path}")
+
+
+@app.command("restore")
+def restore_cmd(
+    archive: Annotated[Path, typer.Argument(help="A psort-backup-*.tar.gz made by `psort backup`.")],
+    relocate: Annotated[bool, typer.Option(help="Review and edit each path in the restored psort.toml, for "
+                                           "a new computer.")] = False,
+    force: Annotated[bool, typer.Option(help="Replace an existing config/state, moving the old ones aside "
+                                        "(*.before-restore-<time>) rather than deleting them.")] = False,
+) -> None:
+    """Restore psort.toml, the database and face models from a backup. Close `psort review` first.
+    On a new computer add --relocate to fix the paths as it goes."""
+    try:
+        result = backup_mod.restore_backup(archive.expanduser(), _config_path, force=force,
+                                           ask=_ask_path if relocate else None)
+    except backup_mod.BackupError as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    info = result.info
+    typer.echo(f"Restored backup from {info.get('created_at', '?')} (host {info.get('host', '?')}, "
+               f"psort {info.get('psort_commit', '?')}).")
+    typer.echo(f"  config: {result.config_path}\n  state:  {result.state_dir}")
+    for old in result.moved_aside:
+        typer.echo(f"  moved aside: {old}")
+    cfg = config_mod.load(result.config_path)
+    typer.echo("Paths on this computer:")
+    _show_paths(cfg)
+    if any(not exists for _, _, exists in backup_mod.path_report(cfg)):
+        typer.secho("Some paths don't exist here. Fix them with `psort relocate` (keep inbox entries in "
+                    "their original order; a missing inbox is simply skipped).", fg="yellow")
+    typer.echo("Thumbnails and face crops were not in the backup and are rebuilt as you browse. "
+               "Next: `psort status`, then `psort run`.")
+
+
+@app.command("relocate")
+def relocate_cmd() -> None:
+    """Review each path in psort.toml and change the ones that moved (new drive letter, new computer).
+    Enter keeps a path. Inbox entries keep their order, which psort's records depend on."""
+    try:
+        old_state = config_mod.load(_config_path).state_dir  # not _open(): never create a database here
+        changed = backup_mod.relocate_config(_config_path, _ask_path)
+    except (backup_mod.BackupError, ConfigError) as e:
+        typer.secho(str(e), fg="red", err=True)
+        raise typer.Exit(1) from e
+    if not changed:
+        typer.echo("No changes.")
+        return
+    typer.echo(f"Updated {_config_path} (previous version kept as {_config_path.name}.before-relocate).")
+    new_cfg = config_mod.load(_config_path)
+    if new_cfg.state_dir != old_state:
+        typer.secho(f"state_dir changed: move the contents of {old_state} to {new_cfg.state_dir} yourself; "
+                    "psort doesn't move its database.", fg="yellow")
+    _show_paths(new_cfg)
 
 
 def _download_models(cfg: Config) -> None:
@@ -135,6 +198,7 @@ def _download_models(cfg: Config) -> None:
 def ingest_cmd() -> None:
     """Scan the inbox and record every file."""
     cfg, conn = _open()
+    _warn_missing_inboxes(cfg)
     _ingest(cfg, conn)
 
 
@@ -164,10 +228,11 @@ def curate_cmd(dry_run: Annotated[bool, typer.Option(help="Show what would chang
 def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; show what would change.")] = False) -> None:
     """Ingest → group moments → score → arrange library → faces → highlights, with progress."""
     cfg, conn = _open()
-    missing = [(i + 1, root) for i, root in enumerate(cfg.input_roots) if not root.is_dir()]
-    if missing:
+    missing = config_mod.missing_inboxes(cfg)
+    if len(missing) == len(cfg.input_roots):
         typer.secho("Inbox not found: " + ", ".join(f"{i}: {root}" for i, root in missing), fg="red", err=True)
         raise typer.Exit(1)
+    _warn_missing_inboxes(cfg)
     # One progress display for the whole run, showing from the very first moment: just looking at a
     # big inbox on a Windows drive takes a minute or more. Step sizes are filled in once known.
     names = ["Scanning inbox", "Grouping moments", "Scoring", "Arranging library"]
@@ -539,6 +604,7 @@ def verify_cmd(
 ) -> None:
     """Report whether an inbox batch (or the whole inbox) is safe to delete."""
     cfg, conn = _open()
+    _warn_missing_inboxes(cfg)
     try:
         results = verify(cfg, conn, batch)
     except FileNotFoundError as e:
@@ -556,6 +622,12 @@ def verify_cmd(
 
 def _say(p: "Progress | None"):
     return p.echo if p else typer.echo
+
+
+def _warn_missing_inboxes(cfg: Config) -> None:
+    for position, root in config_mod.missing_inboxes(cfg):
+        typer.secho(f"Inbox {position} not found, skipped: {root}. Keep its entry in place in "
+                    "paths.inboxes (positions matter); fix the path with `psort relocate`.", fg="yellow")
 
 
 def _ingest(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None, files=None) -> None:

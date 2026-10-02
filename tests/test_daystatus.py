@@ -101,16 +101,17 @@ def test_legacy_reviewed_rows_are_backfilled_before_reclustering(psort, tmp_path
 
 def test_day_navigation_links(ui, tmp_path):
     page = text(ui.get(DAY_URL))
-    assert "Back to Library" in page
+    assert "← Library" in page and 'href="/#m2026-07"' in page
     assert "Next day" in page and 'href="/folder/2026/2026-07-04"' in page
-    assert "Next unreviewed" in page and "Mark reviewed &amp; next unreviewed" in page
+    assert "Next unreviewed" in page and "✓ &amp; next unreviewed" in page
+    assert 'class="breadcrumb"' in page and 'href="/#y2026"' in page
     middle = text(ui.get("/folder/2026/2026-07-04"))
     assert "Previous day" in middle and 'href="/folder/2026/2026-07-03"' in middle
 
     ui.post_ok("/day/2026-07-04/reviewed")
     page = text(ui.get(DAY_URL))
     # Jul 4 is reviewed now, so "next unreviewed" skips ahead to Jul 5.
-    assert re.search(r'href="/folder/2026/2026-07-05">Next unreviewed', page)
+    assert re.search(r'href="/folder/2026/2026-07-05"[^>]*>Next unreviewed', page)
 
 
 def test_pinned_moment_thumbnail_shows_on_library(ui, tmp_path):
@@ -118,15 +119,16 @@ def test_pinned_moment_thumbnail_shows_on_library(ui, tmp_path):
         "SELECT sha256, moment_id FROM photos WHERE substr(library_path, 6, 10) = ? AND is_best = 1 LIMIT 1",
         (DAY,)).fetchone()
     assert "show on Library" in text(ui.get(DAY_URL))
-    assert f"/thumb/{best['sha256']}/320.jpg" not in text(ui.get("/"))
+    link = f'href="/moment/{best["moment_id"]}"'
+    assert link not in text(ui.get("/"))
 
     ui.post_ok(f"/moment/{best['moment_id']}/pin", pinned="1", next=DAY_URL)
     home = text(ui.get("/"))
-    assert f"/thumb/{best['sha256']}/320.jpg" in home and 'class="day-thumbs"' in home
+    assert link in home and 'class="day-thumbs"' in home
     assert "checked" in text(ui.get(DAY_URL)).split(f'id="m-{best["moment_id"]}"')[1].split("</form>")[1]
 
     ui.post_ok(f"/moment/{best['moment_id']}/pin", next=DAY_URL)  # unchecked: no "pinned" field
-    assert f"/thumb/{best['sha256']}/320.jpg" not in text(ui.get("/"))
+    assert link not in text(ui.get("/"))
 
 
 def test_combining_pinned_favorite_moments_keeps_one_pin_and_labels_the_alternate(ui, tmp_path):
@@ -160,3 +162,62 @@ def test_starring_a_photo_pins_its_moment_and_unstarring_keeps_the_pin(ui, tmp_p
     assert best["moment_id"] in pinned()
     ui.post_ok(f"/photo/{best['sha256']}/favorite")  # un-star
     assert best["moment_id"] in pinned()
+
+
+def _html(resp):
+    assert resp.status_code == 200, resp.status_code
+    return resp.get_data(as_text=True)
+
+
+def test_library_grouped_view_has_collapsible_years_months_and_jump_bar(ui):
+    home = _html(ui.get("/"))
+    assert '<details class="year-group" id="y2026"' in home
+    assert 'id="m2026-07"' in home and "July 2026" in home
+    assert 'href="#y2026"' in home and 'href="#undated"' in home  # sticky year jump bar
+    assert 'class="collage' in home  # month/year cover photos
+    assert 'data-todo="yes"' in home  # unreviewed days are tagged for the "only days needing review" filter
+    assert "Only days needing review" in home
+
+
+def test_library_views_switch_and_are_remembered_in_a_cookie(ui):
+    listing = ui.get("/?view=list")
+    assert 'class="month-head"' in _html(listing) and "<details" not in _html(listing)
+    assert "psort-library-view=list" in listing.headers["Set-Cookie"]
+    assert 'class="month-head"' in _html(ui.get("/"))  # no ?view: the cookie decides
+
+    calendar = _html(ui.get("/?view=calendar"))
+    assert 'class="calendar"' in calendar and "cal-new" in calendar
+    assert 'href="/folder/2026/2026-07-03"' in calendar
+    assert 'href="/?view=grouped"' in calendar
+    assert "<details" in _html(ui.get("/?view=grouped"))
+    assert "<details" in _html(ui.get("/?view=bogus"))  # unknown views fall back to the default
+
+
+def test_calendar_and_todo_markers_follow_review_status(ui):
+    ui.post_ok(f"/day/{DAY}/reviewed")
+    calendar = _html(ui.get("/?view=calendar"))
+    assert re.search(r'class="cal-day cal-reviewed" href="/folder/2026/2026-07-03"', calendar)
+    home = _html(ui.get("/?view=grouped"))
+    row = home.split('href="/folder/2026/2026-07-03"')[0].rsplit("<tr", 1)[1]
+    assert 'data-todo="no"' in row
+
+
+def test_day_toolbar_has_matching_buttons_with_destination_dates(ui):
+    page = _html(ui.get("/folder/2026/2026-07-05"))
+    assert 'class="btn-group"' in page and 'class="btn" href="/folder/2026/2026-07-04"' in page
+    assert re.search(r'href="/folder/2026/2026-07-0[34]"[^>]*>« Previous unreviewed \(', page)
+    assert "✓ &amp; « previous unreviewed" in page and "✓ &amp; back to Library" in page
+    assert "shots" not in page.split("</nav>")[0]
+    first = _html(ui.get(DAY_URL))
+    assert '<span class="btn disabled"' in first  # nothing earlier to go back to
+
+    before = re.search(r'name="next" value="([^"]+)">\s*<button class="ok" title="Mark reviewed, then go back', page)
+    assert before and before.group(1).startswith("/folder/2026/2026-07-0")
+
+
+def test_toolbar_marks_reviewed_and_goes_to_previous_unreviewed(ui, tmp_path):
+    page = _html(ui.get("/folder/2026/2026-07-05"))
+    target = re.search(r'name="next" value="([^"]+)">\s*<button class="ok" title="Mark reviewed, then go back', page).group(1)
+    response = ui.post_ok("/day/2026-07-05/reviewed", next=target)
+    assert response.location == target
+    assert db(tmp_path).execute("SELECT 1 FROM reviewed WHERE day = '2026-07-05'").fetchone()

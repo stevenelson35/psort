@@ -82,6 +82,13 @@ class ConfigError(Exception):
     pass
 
 
+def missing_inboxes(cfg: Config) -> list[tuple[int, Path]]:
+    """(1-based position, path) of configured inboxes that aren't there right now (drive unplugged,
+    folder deleted). They're skipped, never dropped from the list: positions are part of every
+    source key, so the entry must stay where it is."""
+    return [(i + 1, root) for i, root in enumerate(cfg.input_roots) if not root.is_dir()]
+
+
 def source_key(root_index: int, relative: Path) -> Path:
     """Keep root zero's historical keys; namespace later roots to avoid relative-path collisions."""
     marker = relative.parts[0] if relative.parts else ""
