@@ -101,6 +101,8 @@ def combine_moments(cfg: Config, conn: sqlite3.Connection, photo_shas: list[str]
         "INSERT OR REPLACE INTO moment_overrides (sha256, moment_id) VALUES (?, ?)",
         [(r["sha256"], target) for r in members],
     )
+    if conn.execute(f"SELECT 1 FROM library_pins WHERE moment_id IN ({moment_marks})", tuple(moment_ids)).fetchone():
+        conn.execute("INSERT OR IGNORE INTO library_pins (moment_id) VALUES (?)", (target,))
     conn.execute(f"UPDATE photos SET user_best = 0 WHERE moment_id IN ({moment_marks})", tuple(moment_ids))
     conn.commit()
     refresh(cfg, conn, recluster=True)

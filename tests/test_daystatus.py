@@ -127,3 +127,24 @@ def test_pinned_moment_thumbnail_shows_on_library(ui, tmp_path):
 
     ui.post_ok(f"/moment/{best['moment_id']}/pin", next=DAY_URL)  # unchecked: no "pinned" field
     assert f"/thumb/{best['sha256']}/320.jpg" not in text(ui.get("/"))
+
+
+def test_combining_pinned_favorite_moments_keeps_one_pin_and_labels_the_alternate(ui, tmp_path):
+    picks = db(tmp_path).execute(
+        "SELECT sha256, moment_id FROM photos WHERE substr(library_path, 6, 10) = ? AND is_best = 1 "
+        "ORDER BY taken_at LIMIT 2", (DAY,)).fetchall()
+    for p in picks:
+        ui.post_ok(f"/photo/{p['sha256']}/favorite")
+        ui.post_ok(f"/moment/{p['moment_id']}/pin", pinned="1", next=DAY_URL)
+    ui.post_ok(f"{DAY_URL}/combine", photo=[p["sha256"] for p in picks], next=DAY_URL)
+
+    conn = db(tmp_path)
+    merged = {r[0] for r in conn.execute(
+        "SELECT moment_id FROM photos WHERE sha256 IN (?, ?)", (picks[0]["sha256"], picks[1]["sha256"]))}
+    assert len(merged) == 1
+    pins = {r[0] for r in conn.execute("SELECT moment_id FROM library_pins")}
+    assert pins == merged  # carried to the merged moment; the absorbed moment's pin is gone
+
+    page = text(ui.get(DAY_URL))
+    assert page.count('data-alternate="true"') == 1  # the other favorite, shown only with the Favorites filter
+    assert "favorite alternate" in page

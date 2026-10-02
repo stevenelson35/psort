@@ -46,6 +46,7 @@ def cluster(cfg: Config, conn: sqlite3.Connection) -> int:
         "UPDATE photos SET moment_id = ? WHERE sha256 = ?",
         [(r["moment_id"], r["sha256"]) for r in overrides],
     )
+    conn.execute("DELETE FROM library_pins WHERE moment_id NOT IN (SELECT DISTINCT moment_id FROM photos)")
     conn.commit()
     mark_duplicates(cfg, conn)
     return conn.execute("SELECT COUNT(DISTINCT moment_id) FROM photos").fetchone()[0]
