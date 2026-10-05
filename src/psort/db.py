@@ -195,6 +195,14 @@ CREATE TABLE IF NOT EXISTS library_pins (
     pinned_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Unreadable images psort tried to recover by re-saving the part it could read (recover.py).
+CREATE TABLE IF NOT EXISTS recoveries (
+    source_path  TEXT PRIMARY KEY,         -- sources.path of the damaged original
+    sha256       TEXT,                     -- the recovered photo; NULL when nothing could be read
+    note         TEXT,
+    tried_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS sources_sha ON sources(sha256);
 CREATE INDEX IF NOT EXISTS photos_moment ON photos(moment_id);
 CREATE INDEX IF NOT EXISTS faces_sha ON faces(sha256);

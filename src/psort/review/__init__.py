@@ -27,7 +27,7 @@ from ..config import DEFAULT_CONFIG_PATH, Config
 from ..dates import UNCERTAIN, sql_in
 from ..db import connect
 from ..library import write_manifest
-from ..imaging import upright
+from ..imaging import to_rgb, upright
 from ..winpath import windows_path
 
 THUMB_SIZES = {320, 1280}
@@ -839,7 +839,7 @@ def _thumbnail(cfg: Config, src: Path, sha: str, size: int) -> Path:
     if not out.exists():
         with Image.open(src) as im:
             im.draft("RGB", (size, size))
-            img = upright(im).convert("RGB")
+            img = to_rgb(upright(im))
         img.thumbnail((size, size), Image.LANCZOS)
         _save_atomic(img, out)
     return out

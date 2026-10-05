@@ -13,7 +13,7 @@ from PIL import Image
 pillow_heif.register_heif_opener()
 cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)  # hide backend chatter
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".png"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".tif", ".tiff", ".gif", ".webp"}
 VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".avi", ".3gp", ".mkv", ".mts", ".m2ts", ".wmv", ".mpg", ".mpeg",
               ".mod", ".tod", ".vob", ".webm", ".flv", ".dv"}
 # Nokia Lumia Rich Capture packages: a ZIP of the frames behind a _Rich.jpg.
@@ -43,7 +43,7 @@ def is_junk(path: Path) -> bool:
 
 def normalize_ext(ext: str) -> str:
     ext = ext.lower()
-    return {".jpeg": ".jpg", ".heif": ".heic"}.get(ext, ext)
+    return {".jpeg": ".jpg", ".heif": ".heic", ".tiff": ".tif"}.get(ext, ext)
 
 
 def sha256_file(path: Path) -> str:
@@ -111,6 +111,17 @@ _ORIENTATION_TRANSPOSE = {
 }
 
 
+def to_rgb(im: Image.Image) -> Image.Image:
+    """8-bit RGB. Pillow's plain convert() clips 16-bit and float pixels (scanner/editor TIFFs) to
+    near-white, so those are scaled into range first."""
+    if im.mode in ("I;16", "I;16L", "I;16B", "I;16N", "I", "F"):
+        data = np.asarray(im, dtype=np.float64)
+        top = data.max() if data.size else 0
+        data = data / (65535.0 if top > 255 and im.mode != "F" else max(top, 1.0)) * 255
+        im = Image.fromarray(data.clip(0, 255).astype(np.uint8))
+    return im.convert("RGB")
+
+
 def upright(im: Image.Image) -> Image.Image:
     """Apply the EXIF orientation to the pixels. Unlike ImageOps.exif_transpose, this doesn't
     rebuild the EXIF block, which crashes Pillow on some odd metadata (e.g. Windows Phone
@@ -130,7 +141,7 @@ def load_small(path: Path) -> tuple[Image.Image, Image.Exif, int, int]:
         if exif.get(_TAG_ORIENTATION) in (5, 6, 7, 8):
             width, height = height, width
         im.draft("RGB", (ANALYSIS_SIZE, ANALYSIS_SIZE))  # fast JPEG downscale; no-op otherwise
-        small = upright(im).convert("RGB")
+        small = to_rgb(upright(im))
     small.thumbnail((ANALYSIS_SIZE, ANALYSIS_SIZE))
     return small, exif, width, height
 

@@ -45,12 +45,12 @@ The user's actual locations are set in `~/.config/psort/psort.toml`:
 
 | Type | Handling |
 |---|---|
-| **JPEG, HEIC/HEIF, PNG** | Photos. HEIC is read with `pillow-heif`. The **library keeps each original byte-for-byte**, and exports are always JPEG. PNG screenshots are flagged. |
+| **JPEG, HEIC/HEIF, PNG, TIFF, GIF, WebP** | Photos. HEIC is read with `pillow-heif`. The **library keeps each original byte-for-byte**, and exports are always JPEG. PNG screenshots are flagged. `.tiff` is stored as `.tif`. Animated GIF/WebP and multi-page TIFF are analyzed and thumbnailed from their first frame. 16-bit and float TIFFs are scaled into 8-bit for analysis and thumbnails (`to_rgb`) rather than clipped to white. Files with no EXIF are dated from the filename, folder name, then file time. |
 | **iPhone Live Photo clip** | A `.mov`/`.mp4` of 5 seconds or less beside a same-named HEIC or JPEG. It's kept beside its photo, with the same name (§5.8). |
 | **Nokia Lumia Rich Capture `.nar`** | A ZIP of flash, no-flash and blend frames behind a `_Rich.jpg`. The package is kept beside its photo, and each frame becomes a photo (§5.12). |
 | **Videos** | `.mp4 .mov .m4v .3gp .avi .mpg .mpeg .mts .m2ts .mod .tod .vob .wmv .mkv .webm .flv .dv`: copied to `videos/` (§5.8) |
 | **Helpers** | `.THM` (camera video preview, which also dates its video) and `.AAE` (iPhone edits): copied to `unsorted_files/` |
-| **Anything else** | Documents, `.picasa.ini`, unreadable or corrupt files: copied to `unsorted_files/` |
+| **Anything else** | Documents, `.picasa.ini`, unreadable or corrupt files: copied to `unsorted_files/`. Corrupt images can be recovered (§5.13) |
 
 - **Very large images** (up to 300 MP) are allowed, raised from Pillow's "decompression bomb" guard, for posters and panoramas.
 - **Orientation:** psort applies the EXIF orientation itself instead of using Pillow's `exif_transpose`, which crashes on some real-world metadata, such as Windows Phone photos.
@@ -103,7 +103,8 @@ input directories ─[1 scan]─► state DB ─[2 group moments]─► ─[3 sc
   - Anything without a real time is never grouped into bursts or events.
   - `folder-month` and `mtime` photos are listed on the Undated page.
 - **Deleted photos** (§5.10) seen again in the inbox are not copied back.
-- **Unreadable files** are copied to `unsorted_files`, and **retried on every run**. If a retry succeeds, the photo goes into the library and its unsorted copy is removed.
+- **Unreadable files** are copied to `unsorted_files`, and **retried on every run**. If a retry succeeds, the photo goes into the library and its unsorted copy is removed. Damaged images can also be re-saved (§5.13).
+- **Types psort learns later:** a file recorded as "other" whose type is now supported (e.g. `.tif`, `.gif`, `.webp`, added 2026-10-04) is re-examined on the next `psort run`, filed in the library, and its `unsorted_files/` copy removed.
 - **Safe while files are still being copied in:**
   - **Verified Windows behavior on this PC:** a copy's destination has its full size from the start, and its mtime/ctime update every second. When the copy completes, the original mtime is restored.
   - Files changed within `settle_seconds` (default 120, `[inbox]`) are skipped as "still arriving."
@@ -239,6 +240,15 @@ a_library/
 - **Review UI badges:** ◈ Rich, and ◈ flash / no flash / blend frame.
 - The user has 667 packages (about 8.7 GB); 3 have no finished photo.
 
+### 5.13 Recovering unreadable images
+
+- **What counts:** sources recorded with status `error` and an image extension, whether found during this run or long ago, whether or not the inbox copy still exists (the byte-identical copy in `unsorted_files/` is used if not). Not tried before, unless `--retry`.
+- **How:** `recover.py` opens the file with Pillow, tolerating truncation (decodes what's there; the missing part is blank/grey), then falls back to OpenCV. It rejects results that are tiny or blank, and anything over 512 MB. The picture is saved as a quality-95 JPEG keeping the original's EXIF and color profile, so the capture date usually survives. Re-encoding is lossy and the recovered photo is a **separate photo** (new SHA-256), not a repair of the original.
+- **Originals are never touched:** the inbox file and the `unsorted_files/` copy stay. The recovered JPEG is kept in `<state_dir>/recovered/<sha>.jpg` (not a cache: it's included in backups) until `curate` copies it into the library (`library._find_source` falls back to it, so a lost library copy is rebuilt too).
+- **Each attempt is recorded** in `recoveries` (success or failure) so it isn't offered again; `psort recover --retry` retries failures.
+- **When:** `psort run` ends by listing unreadable images and, from a terminal, asking whether to try. Not from a terminal, it just mentions `psort recover`. `--recover` answers yes, `--no-recover` suppresses it. `psort recover [--yes] [--retry]` does it any time. Recovered photos then go through grouping, scoring, curation, faces and highlights immediately.
+- **Limits:** a file that isn't really an image (garbage, a disk image with a `.jpg` name) is reported as not recoverable. The user's real data (2026-10-04) had one truncated photo (recoverable, 15 of 3008 rows lost) and one 72 GB "`.jpg`".
+
 ## 6. Review UI
 
 - **`psort review`** starts Flask on **127.0.0.1:5000**, with no login. Requests whose Host isn't localhost are refused, and every change needs a per-launch token (a Jinja global, so imported macros see it). Dark mode is the default, with a light toggle remembered per browser.
@@ -314,6 +324,7 @@ Run with `uv run psort …` from the repo.
 | `export <post> [names…] [--keep-tray]` | Export only (§7) |
 | `blog-login` | Saves and tests the FTPS login (§8) |
 | `reconcile [--apply]` | Repairs records after hand edits (§5.11) |
+| `recover [--yes] [--retry]` | Re-saves what can be read of unreadable images as new library photos; the damaged originals stay (§5.13). `run` offers it at the end: `--recover` / `--no-recover` |
 | `empty-trash` | Permanently deletes trashed photos |
 | `fetch-models` | Downloads the face models if missing |
 | `backup [--out DIR] [--include-caches]` | Archives the config directory and the state directory (DB, face models) into a dated, commit-tagged `.tar.gz`; `--out` defaults to `~/psort-backups/` (§12). Also available as a **Backup** page in the review UI |
@@ -360,6 +371,7 @@ Run with `uv run psort …` from the repo.
 - **2026-10-01 (later):** day pages show each photo's width × height and a **Favorites** filter (surfaces a moment's favorited shot even when it's not that moment's current best); scoring gained a **Resolution** weight so a higher-pixel-count shot wins close/ambiguous comparisons; and `psort backup` / a **Backup** page in the review UI archive the config and state directories into a dated, commit-tagged `.tar.gz` (§9, §6).
 - **2026-10-01 (evening):** day review status is now derived from a stored fingerprint (new / reviewed / pics added / moments updated), replacing the old "drop the reviewed row when a new photo lands"; day pages got previous/next and previous/next-unreviewed navigation; and moments can be pinned to show a thumbnail beside their day on the Library page (§6).
 - **2026-10-02:** Library redesign (Years & months / List / Calendar views, year jump bar, only-days-needing-review filter, collages), day-page breadcrumb and matching toolbar with destination dates and a **✓ & « previous unreviewed** button (§6); `psort restore [--relocate]` and `psort relocate` for moving to a new computer (§9); a missing inbox is skipped with a warning instead of aborting the run (§2).
+- **2026-10-04:** TIFF, GIF and WebP are photos now (files already in `unsorted_files/` move to the library on the next run, §3); `psort recover` and an end-of-run offer re-save unreadable images as new photos (§5.13); `psort restore`/`relocate` and missing-inbox handling from 2026-10-02 are described in §2 and §9.
 
 ### Backlog and ideas (not built)
 - **People filter** on day pages and in search, beyond Favorites. Optionally, favor shots where family faces are sharp.
@@ -391,6 +403,7 @@ Run with `uv run psort …` from the repo.
 | `highlights.py` | Favorites and the `highlights/` sync |
 | `trash.py` | Delete/restore/empty trash, companions |
 | `reconcile.py` | Repairing records after hand edits |
+| `recover.py` | Re-saving unreadable images (§5.13) |
 | `export.py` | Web JPEG rendering (allowlisted metadata) and outbox export |
 | `blog.py` | Composer draft, post rendering, responsive sizes, FTPS uploader, git publish |
 | `actions.py` | Review decisions shared by UI and CLI; `refresh()` re-scores, curates, syncs highlights, writes the manifest; `combine_moments`/`split_moment` edit `moment_overrides` |

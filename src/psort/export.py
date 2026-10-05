@@ -10,7 +10,7 @@ from PIL import Image
 
 from .config import Config
 from .events import slugify
-from .imaging import upright
+from .imaging import to_rgb, upright
 
 MAX_EDGE = 2048  # the blog's largest responsive size
 QUALITY = 85
@@ -62,7 +62,7 @@ def render(src: Path, dest: Path, description: str | None = None, keywords: list
         rgba = img.convert("RGBA")
         img = Image.new("RGB", rgba.size, "white")
         img.paste(rgba, mask=rgba.getchannel("A"))
-    img = img.convert("RGB")
+    img = to_rgb(img)
     img.thumbnail((MAX_EDGE, MAX_EDGE), Image.LANCZOS)  # only ever shrinks
     img.info = {}  # otherwise Pillow carries the original's JPEG comment across
     dest.parent.mkdir(parents=True, exist_ok=True)

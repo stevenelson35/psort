@@ -165,7 +165,7 @@ def _unchanged(known, st, path: Path) -> bool:
         known and known["size"] == st.st_size and known["mtime"] == st.st_mtime
         and (known["sha256"] is not None or known["status"] == "junk")
         and known["status"] != "error"  # unreadable last time: try again (psort may have improved)
-        and not (known["status"] == "other" and kind_of(path) == "rich")  # handled as a package now
+        and not (known["status"] == "other" and kind_of(path) in ("rich", "image"))  # understood since
     )
 
 
@@ -303,8 +303,8 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
             if known and known["status"] == "error" and new and new["status"] != "error":
                 stats.recovered += 1
                 _drop_unsorted_copy(cfg, conn, new["sha256"])
-            elif known and known["status"] == "other" and new and new["status"] == "rich":
-                _drop_unsorted_copy(cfg, conn, new["sha256"])  # was filed as "other" before packages were understood
+            elif known and known["status"] == "other" and new and new["status"] in ("rich", "image"):
+                _drop_unsorted_copy(cfg, conn, new["sha256"])  # filed as "other" before psort understood this type
 
             if processed % 100 == 0:
                 conn.commit()
@@ -383,6 +383,16 @@ def _remove_empty(path: Path, root: Path) -> None:
         parent = parent.parent
 
 
+def add_photo(conn, sha: str, ext: str, a, taken: datetime, source: str, screenshot: bool) -> None:
+    conn.execute(
+        """INSERT INTO photos (sha256, ext, taken_at, tz_offset, date_source, camera, width, height,
+               is_screenshot, phash, sharpness, exposure, faces, face_sharpness)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (sha, normalize_ext(ext), taken.isoformat(), a.exif_offset, source, a.camera, a.width,
+         a.height, int(screenshot), a.phash, a.sharpness, a.exposure, a.faces, a.face_sharpness),
+    )
+
+
 def _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats) -> None:
     sha = sha256_file(path)
     if conn.execute("SELECT 1 FROM photos WHERE sha256 = ?", (sha,)).fetchone():
@@ -393,14 +403,7 @@ def _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats) -> None:
         a = analyze(path, detector)
         _steady(path, st)  # don't record a file that changed while we read it
         taken, source = _taken_at(path, rel, a.exif_datetime, st.st_mtime)
-        conn.execute(
-            """INSERT INTO photos (sha256, ext, taken_at, tz_offset, date_source, camera, width, height,
-                   is_screenshot, phash, sharpness, exposure, faces, face_sharpness)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (sha, normalize_ext(ext), taken.isoformat(), a.exif_offset, source, a.camera, a.width,
-             a.height, int(_is_screenshot(path, a.camera)), a.phash, a.sharpness, a.exposure,
-             a.faces, a.face_sharpness),
-        )
+        add_photo(conn, sha, ext, a, taken, source, _is_screenshot(path, a.camera))
         stats.new_photos += 1
     _record_source(conn, rel, st, "image", sha=sha)
 

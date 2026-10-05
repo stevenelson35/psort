@@ -3,6 +3,7 @@
 import dataclasses
 import os
 import sqlite3
+import sys
 import urllib.request
 from pathlib import Path
 from typing import Annotated
@@ -16,6 +17,7 @@ from . import faces as faces_mod
 from . import blog as blog_mod
 from . import browse as browse_mod
 from . import highlights as highlights_mod
+from . import recover as recover_mod
 from .config import DEFAULT_CONFIG_PATH, DEFAULT_STATE_DIR, Config, ConfigError
 from .dates import UNCERTAIN, sql_in
 from .db import connect
@@ -225,7 +227,12 @@ def curate_cmd(dry_run: Annotated[bool, typer.Option(help="Show what would chang
 
 
 @app.command()
-def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; show what would change.")] = False) -> None:
+def run(
+    dry_run: Annotated[bool, typer.Option(help="Don't touch the library; show what would change.")] = False,
+    recover: Annotated[bool | None, typer.Option(
+        "--recover/--no-recover", help="Unreadable images: always try to recover them / never ask. "
+        "Default: ask at the end of the run when run from a terminal.")] = None,
+) -> None:
     """Ingest → group moments → score → arrange library → faces → highlights, with progress."""
     cfg, conn = _open()
     missing = config_mod.missing_inboxes(cfg)
@@ -280,6 +287,53 @@ def run(dry_run: Annotated[bool, typer.Option(help="Don't touch the library; sho
         p.done()
     finally:
         p.close()  # stop the spinner even if the run is interrupted
+    if not dry_run:
+        _offer_recovery(cfg, conn, recover, interactive=sys.stdin.isatty() and sys.stdout.isatty())
+
+
+def _offer_recovery(cfg: Config, conn: sqlite3.Connection, assume: bool | None, retry: bool = False,
+                    interactive: bool = True) -> None:
+    """Unreadable images: offer to re-save whatever can be read as new library photos. `assume` is
+    True/False to answer for the user, None to ask (or, when not interactive, just mention it)."""
+    found = recover_mod.candidates(cfg, conn, retry)
+    if not found or assume is False:
+        return
+    typer.echo(f"\n{len(found)} unreadable image(s) found (kept untouched in unsorted_files):")
+    for c in found[:10]:
+        typer.echo(f"  {c.source_path} — {c.reason[:90]}")
+    if len(found) > 10:
+        typer.echo(f"  … and {len(found) - 10} more")
+    if assume is None:
+        if not interactive:
+            typer.echo("Run `psort recover` to try recovering them.")
+            return
+        if not typer.confirm("Try to recover them by opening what can be read and saving new copies to the library?"):
+            return
+    outcomes = recover_mod.recover_all(cfg, conn, found, log=typer.echo)
+    added = sum(o.new for o in outcomes)
+    typer.echo(f"Recovered {sum(o.sha is not None for o in outcomes)} of {len(found)}"
+               f"{f' ({added} new photo(s))' if added else ''}. The damaged originals were left as they are.")
+    if added:
+        _cluster(cfg, conn)
+        score(cfg, conn)
+        _curate(cfg, conn, False)
+        _faces(cfg, conn)
+        _highlights(cfg, conn)
+
+
+@app.command("recover")
+def recover_cmd(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask first.")] = False,
+    retry: Annotated[bool, typer.Option(help="Also try again the files that couldn't be recovered before.")] = False,
+) -> None:
+    """Try to recover unreadable images (truncated or damaged JPEGs and the like) by opening what can be
+    read and saving it as a new photo in the library. The damaged original is never changed or removed.
+    Works on files already in unsorted_files too."""
+    cfg, conn = _open()
+    if not recover_mod.candidates(cfg, conn, retry):
+        typer.echo("No unreadable images to recover." + ("" if retry else " (--retry tries earlier failures again.)"))
+        return
+    _offer_recovery(cfg, conn, True if yes else None, retry)
 
 
 @app.command()

@@ -64,6 +64,7 @@ uv run psort blog-login             # once: test + save the Turbify FTPS login f
 uv run psort export <post>          # "export only" to the outbox, for blogupdate.html
 uv run psort reconcile [--apply]    # after moving/renaming/deleting library files by hand
 uv run psort empty-trash            # permanently delete trashed photos
+uv run psort recover [--yes] [--retry]   # re-save unreadable/truncated images as new library photos (originals stay); `run` offers it too
 uv run psort highlights             # sync highlights/ with ★ favorites (also part of run)
 uv run psort close-calls            # list near-tie moments
 uv run psort events | events name <id> <name> [--through <id>] | events unname <name>
@@ -73,6 +74,8 @@ uv run psort restore <archive> --relocate  # restore a backup on a new computer,
 uv run psort relocate                      # review/edit the paths in psort.toml
 uv run psort publish-browse [--dry-run]    # publish favorites + manifest for the browse page, with a CORS rule for the blog origin
 ```
+
+Photos can be JPEG, HEIC/HEIF, PNG, TIFF, GIF or WebP. Anything psort can't read as an image (including damaged photos) is kept in `unsorted_files/`; `psort recover` (also offered at the end of `psort run`) re-saves what can be read of a damaged image as a new library photo and leaves the original alone.
 
 psort never writes to the inbox, and every inbox file ends up copied somewhere, except OS cache files. Delete a batch yourself once `psort verify` says it's safe.
 

@@ -290,6 +290,10 @@ def _find_source(cfg: Config, conn: sqlite3.Connection, sha: str) -> Path | None
         path = source_file(cfg, r["path"])
         if path.exists():
             return path
+    from .recover import recovered_file
+
+    if (saved := recovered_file(cfg, sha)).exists():  # a re-saved copy of a damaged image
+        return saved
     # A frame unpacked from a Rich Capture package: extract it again from the package.
     from .rich import extract_frame
 
