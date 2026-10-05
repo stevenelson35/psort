@@ -11,11 +11,12 @@
     {% for y in years %}<option {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
   <select name="person"><option value="">Everyone</option>
     {% for p in people %}<option {% if p == person %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+  <label><input type="checkbox" name="top" value="1" {% if top %}checked{% endif %}> ◆ top picks only</label>
   <button>Filter</button>
-  {% if year or person %}<a href="{{ url_for('favorites') }}">clear</a>{% endif %}
+  {% if year or person or top %}<a href="{{ url_for('favorites') }}">clear</a>{% endif %}
   <span class="muted">{{ photos|length }} photo{{ "" if photos|length == 1 else "s" }}</span>
 </form>
-{% if not photos %}<p>{% if year or person %}No favorites match.{% else %}No favorites yet. Click ☆ on any photo.{% endif %}</p>{% endif %}
+{% if not photos %}<p>{% if year or person or top %}No favorites match.{% else %}No favorites yet. Click ☆ on any photo.{% endif %}</p>{% endif %}
 {% if photos %}{{ image_zoom("favorite-photos") }}{% endif %}
 <div class="grid zoomable-grid" id="favorite-photos">
 {% for p in photos %}

@@ -497,6 +497,28 @@ def empty_trash_cmd() -> None:
         typer.echo("The trash is empty.")
 
 
+@app.command("top-picks")
+def top_picks_cmd(
+    out: Annotated[Path | None, typer.Option(help="Also copy the top picks, flat, into this folder.")] = None,
+    originals: Annotated[bool, typer.Option(help="With --out: copy the full-resolution originals instead of "
+                                            "web-size JPEGs.")] = False,
+) -> None:
+    """Bring top_picks/ up to date with your ◆ top picks (also part of `psort run`), and optionally copy
+    them to another folder for sharing or export. Existing files there are left alone."""
+    cfg, conn = _open()
+    _highlights(cfg, conn)
+    n = conn.execute("SELECT COUNT(*) FROM top_picks").fetchone()[0]
+    typer.echo(f"{n} top pick(s) in {cfg.top_picks}\nIn Windows: {windows_path(cfg.top_picks)}")
+    if out is None:
+        return
+    if not n:
+        typer.echo("No top picks yet. Click ◇ on a photo in the review UI.")
+        return
+    copied, skipped = highlights_mod.export_top_picks(cfg, conn, out.expanduser().resolve(), originals)
+    typer.echo(f"Copied {copied} {'original' if originals else 'web-size'} file(s) to {out}"
+               + (f"; {skipped} already there or missing" if skipped else ""))
+
+
 @app.command("highlights")
 def highlights_cmd() -> None:
     """Bring highlights/ up to date with your favorites (also part of `psort run`)."""
@@ -723,6 +745,8 @@ def _highlights(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = No
     s = highlights_mod.sync(cfg, conn, log=_say(p))
     if s.written or s.moved or s.removed:
         _say(p)(f"Highlights: {s.written} written, {s.moved} moved, {s.removed} removed → {cfg.highlights}")
+    if (t := s.top) and (t.written or t.moved or t.removed):
+        _say(p)(f"Top picks: {t.written} written, {t.moved} moved, {t.removed} removed → {cfg.top_picks}")
 
 
 def _faces(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None) -> None:

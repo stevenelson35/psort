@@ -125,7 +125,7 @@ def test_pinned_moment_thumbnail_shows_on_library(ui, tmp_path):
     ui.post_ok(f"/moment/{best['moment_id']}/pin", pinned="1", next=DAY_URL)
     home = text(ui.get("/"))
     assert link in home and 'class="day-thumbs"' in home
-    assert "checked" in text(ui.get(DAY_URL)).split(f'id="m-{best["moment_id"]}"')[1].split("</form>")[1]
+    assert "checked" in text(ui.get(DAY_URL)).split(f'/moment/{best["moment_id"]}/pin"')[1].split("</form>")[0]
 
     ui.post_ok(f"/moment/{best['moment_id']}/pin", next=DAY_URL)  # unchecked: no "pinned" field
     assert link not in text(ui.get("/"))

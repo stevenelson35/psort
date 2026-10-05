@@ -167,8 +167,8 @@ def test_restore_with_relocate_moves_everything_to_new_paths(psort, tmp_path, sa
     old_photos = db(tmp_path).execute("SELECT COUNT(*) FROM photos").fetchone()[0]
     config, new = _new_machine(tmp_path)
     nm = tmp_path / "new-machine"
-    # inbox 1, library, outbox, videos, unsorted, highlights, state_dir
-    answers = [str(nm / "inbox"), str(nm / "library"), "", "", "", "", str(nm / "state")]
+    # inbox 1, library, outbox, videos, unsorted, highlights, top_picks, state_dir
+    answers = [str(nm / "inbox"), str(nm / "library"), "", "", "", "", "", str(nm / "state")]
 
     out = new("restore", str(archive), "--relocate", input="\n".join(answers) + "\n").output
     assert "Restored backup" in out and "missing" in out  # the new inbox/library don't exist yet
@@ -187,7 +187,7 @@ def test_restore_refuses_to_overwrite_unless_forced_and_never_deletes(psort, tmp
     archive = _real_backup(psort, tmp_path)
     config, new = _new_machine(tmp_path)
     nm = tmp_path / "nm"
-    answers = "\n".join([str(nm / "inbox"), str(nm / "library"), "", "", "", "", str(nm / "state")]) + "\n"
+    answers = "\n".join([str(nm / "inbox"), str(nm / "library"), "", "", "", "", "", str(nm / "state")]) + "\n"
     new("restore", str(archive), "--relocate", input=answers)
 
     (nm / "state/precious.txt").write_text("keep me")
@@ -218,7 +218,7 @@ def test_restore_rejects_files_that_are_not_psort_backups(tmp_path):
 
 
 def test_relocate_command_edits_the_current_config(psort, tmp_path, sample_inbox):
-    out = psort("relocate", input="\n".join([str(tmp_path / "moved-inbox"), "", "", "", "", "", ""]) + "\n").output
+    out = psort("relocate", input="\n".join([str(tmp_path / "moved-inbox"), "", "", "", "", "", "", ""]) + "\n").output
     assert "Updated" in out and "moved-inbox" in out
     assert tomllib.loads((tmp_path / "psort.toml").read_text())["paths"]["inboxes"] == [str(tmp_path / "moved-inbox")]
-    assert "No changes." in psort("relocate", input="\n" * 8).output
+    assert "No changes." in psort("relocate", input="\n" * 9).output

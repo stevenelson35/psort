@@ -11,17 +11,18 @@
       {{ progress.photos_done }} / {{ progress.photos }} photos</span>
   </div>
 {% endif %}
-{% if not overview.years and not overview.undated %}<p>Nothing curated yet. Run <code>psort run</code>.</p>{% endif %}
+{% if not overview.years and not overview.undated and not gallery %}<p>Nothing curated yet. Run <code>psort run</code>.</p>{% endif %}
 <div class="toolbar">
   <span class="btn-group" role="group" aria-label="Library view">
-    {% for v, label in [("grouped", "Years & months"), ("list", "List"), ("calendar", "Calendar")] %}
+    {% for v, label in [("grouped", "Years & months"), ("list", "List"), ("calendar", "Calendar"),
+                        ("favorites", "★ Favorites (" ~ counts.favorites ~ ")"), ("top", "◆ Top picks (" ~ counts.top ~ ")")] %}
       <a class="btn{% if view == v %} active{% endif %}" href="{{ url_for('index', view=v) }}"
          {% if view == v %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </span>
   <span class="btn-group">
-    <label><input type="checkbox" id="todo-only"> Only days needing review ({{ todo_count }})</label>
-    {% if view != "calendar" %}<label title='Tick "show on Library" under a moment on its day page to add one'>
+    {% if not gallery %}<label><input type="checkbox" id="todo-only"> Only days needing review ({{ todo_count }})</label>{% endif %}
+    {% if view in ("grouped", "list") %}<label title='Tick "show on Library" under a moment on its day page to add one'>
       <input type="checkbox" id="show-day-thumbs" checked> Show day thumbnails</label>{% endif %}
   </span>
   {% if view == "grouped" %}
@@ -32,8 +33,8 @@
   {% endif %}
 </div>
 <nav class="jump-bar" aria-label="Jump to year">
-  {% for y in overview.years %}<a href="#y{{ y.year }}">{{ y.year }}</a>{% endfor %}
-  {% if overview.undated %}<a href="#undated">Undated</a>{% endif %}
+  {% for y in (gallery.years if gallery else overview.years) %}<a href="#y{{ y.year }}">{{ y.year }}</a>{% endfor %}
+  {% if (gallery.undated if gallery else overview.undated) %}<a href="#undated">Undated</a>{% endif %}
 </nav>
 
 {% macro day_rows(f) -%}
@@ -105,6 +106,28 @@
   {% endfor %}
   {% if overview.undated %}
   <section id="undated" data-todo="0"><h2>Undated</h2><table class="folders">{{ day_rows(overview.undated) }}</table></section>
+  {% endif %}
+
+{% elif gallery %}
+  <p class="muted small">Only the photos you picked, by year. Click one to open its moment.
+    {% if view == "favorites" %}◆ marks a top pick.{% endif %}</p>
+  {% if not gallery.count %}<p>{% if view == "top" %}No top picks yet. Click ◇ on any photo (it also becomes a favorite).{% else %}No favorites yet. Click ☆ on any photo.{% endif %}</p>{% endif %}
+  {% macro pick(t) -%}
+    <a href="{{ url_for('moment', moment_id=t.moment_id) }}" title="{{ t.name }}: open its moment"><img
+      src="{{ url_for('thumb', sha=t.sha256, size=320) }}" loading="lazy" alt="{{ t.name }}"><span{% if t.top %} class="top"{% endif %}>{% if view == "favorites" and t.top %}◆ {% endif %}{{ t.label }}</span></a>
+  {%- endmacro %}
+  {% for y in gallery.years %}
+  <section id="y{{ y.year }}">
+    <h2>{{ y.year }} <span class="muted small">{{ y.count }} photo{{ "" if y.count == 1 else "s" }}</span></h2>
+    {% for m in y.months %}
+    <h3 class="month-title" id="m{{ m.month }}">{{ m.label }}</h3>
+    <div class="gallery">{% for t in m.photos %}{{ pick(t) }}{% endfor %}</div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+  {% if gallery.undated %}
+  <section id="undated"><h2>Undated <span class="muted small">{{ gallery.undated|length }}</span></h2>
+    <div class="gallery">{% for t in gallery.undated %}{{ pick(t) }}{% endfor %}</div></section>
   {% endif %}
 
 {% else %}

@@ -29,7 +29,7 @@ class BrowseError(Exception):
 
 def favorite_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        """SELECT p.sha256, p.name, p.library_path, p.taken_at FROM photos p
+        """SELECT p.sha256, p.name, p.library_path, p.taken_at, fav.top FROM photos p
            JOIN favorites fav ON fav.sha256 = p.sha256
            WHERE p.library_path IS NOT NULL
            ORDER BY p.taken_at, p.name"""
@@ -54,8 +54,10 @@ def build_manifest(conn: sqlite3.Connection) -> dict:
         slug = slug_for(r["taken_at"], ranges)
         if slug:
             used_events.add(slug)
-        photos.append({"id": r["name"], "taken_at": r["taken_at"], "people": people.get(r["sha256"], []),
-                       "event": slug})
+        photo = {"id": r["name"], "taken_at": r["taken_at"], "people": people.get(r["sha256"], []), "event": slug}
+        if r["top"]:
+            photo["top"] = True  # only present on top picks, so older data and manifests are unchanged
+        photos.append(photo)
     events = [{"slug": s, "name": s.replace("-", " "), "start": by_slug[s]["start"], "end": by_slug[s]["end"]}
               for s in sorted(used_events)]
     return {"version": 1, "photos": photos, "events": events}

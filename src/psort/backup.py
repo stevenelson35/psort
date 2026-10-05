@@ -122,7 +122,7 @@ def list_backups(out_dir: Path) -> list[dict]:
 # --- Restore / relocate (DESIGN.md §12) -------------------------------------------------------
 
 # The [paths] settings that name places on one particular computer, in the order they're asked.
-PATH_KEYS = ("inboxes", "inbox", "library", "outbox", "videos", "unsorted", "highlights", "state_dir")
+PATH_KEYS = ("inboxes", "inbox", "library", "outbox", "videos", "unsorted", "highlights", "top_picks", "state_dir")
 
 _STRING = r"""(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*')"""
 _VALUE = rf"(?:\[(?:\s|#[^\n]*|,|{_STRING})*\]|{_STRING})"
@@ -198,7 +198,8 @@ def path_report(cfg: Config) -> list[tuple[str, Path, bool]]:
     """(label, path, exists) for each place on this computer the config points at."""
     rows = [(f"inbox {i}", root, root.is_dir()) for i, root in enumerate(cfg.input_roots, 1)]
     for label, path in (("library", cfg.library), ("outbox", cfg.outbox), ("videos", cfg.videos),
-                        ("unsorted", cfg.unsorted), ("highlights", cfg.highlights), ("state", cfg.state_dir)):
+                        ("unsorted", cfg.unsorted), ("highlights", cfg.highlights), ("top picks", cfg.top_picks),
+                        ("state", cfg.state_dir)):
         rows.append((label, path, path.is_dir()))
     return rows
 

@@ -33,6 +33,7 @@ class Config:
     videos_dir: Path | None = None  # default: a videos/ folder beside the library
     unsorted_dir: Path | None = None  # default: an unsorted_files/ folder beside the library
     highlights_dir: Path | None = None  # default: a highlights/ folder beside the library
+    top_picks_dir: Path | None = None  # default: a top_picks/ folder beside the library
     settle_seconds: float = 120.0  # files changed more recently than this are still arriving
     burst_gap_seconds: float = 10.0
     phash_threshold: int = 10
@@ -60,6 +61,10 @@ class Config:
     @property
     def highlights(self) -> Path:
         return self.highlights_dir or self.library.parent / "highlights"
+
+    @property
+    def top_picks(self) -> Path:
+        return self.top_picks_dir or self.library.parent / "top_picks"
 
     @property
     def db_path(self) -> Path:
@@ -149,6 +154,7 @@ def load(path: Path) -> Config:
             videos_dir=Path(paths["videos"]).expanduser() if "videos" in paths else None,
             unsorted_dir=Path(paths["unsorted"]).expanduser() if "unsorted" in paths else None,
             highlights_dir=Path(paths["highlights"]).expanduser() if "highlights" in paths else None,
+            top_picks_dir=Path(paths["top_picks"]).expanduser() if "top_picks" in paths else None,
             burst_gap_seconds=float(cluster.get("burst_gap_seconds", 10.0)),
             settle_seconds=float(inbox_opts.get("settle_seconds", 120.0)),
             phash_threshold=int(cluster.get("phash_threshold", 10)),
@@ -184,6 +190,8 @@ videos = {q(videos or library.parent / "videos")}
 unsorted = {q(library.parent / "unsorted_files")}
 # Small copies of your favorites, kept in sync automatically (same folders and names as the library).
 highlights = {q(library.parent / "highlights")}
+# Your very best photos (marked ◆ in the review UI), flat in one folder so they're easy to copy or show off.
+top_picks = {q(library.parent / "top_picks")}
 state_dir = {q(state_dir)}
 
 [inbox]

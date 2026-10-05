@@ -32,6 +32,7 @@ The user's actual locations are set in `~/.config/psort/psort.toml`:
 | **Videos** | `…/OneDrive/photos/psort/videos` | Yes | Videos, in the same year/day/event folders as the library (§5.8) |
 | **Unsorted files** | `…/OneDrive/photos/psort/unsorted_files` | Yes | Every other file, under its original inbox path with spaces → hyphens |
 | **Highlights** | `…/OneDrive/photos/psort/highlights` | Yes | Web-size copies of ★ favorites, kept in sync (§5.9) |
+| **Top picks** | `…/OneDrive/photos/psort/top_picks` | Yes | Web-size copies of ◆ top picks, **flat** (one folder, `<name>.jpg`), kept in sync (§5.9). `paths.top_picks` |
 | **Outbox** | `/mnt/c/shared/media/psorted_outbox` | Yes | "Export only" copies for `blogupdate.html` (§7) |
 | **State** | `~/.local/share/psort/` (inside WSL) | Yes | SQLite database, thumbnail and poster caches, face models |
 
@@ -209,7 +210,8 @@ a_library/
 
 ### 5.9 Favorites and highlights
 
-- **Favorites:** ☆/★ on any photo. The **★ Favorites** page filters by year and person.
+- **Favorites:** ☆/★ on any photo. The **★ Favorites** page filters by year and person, and by **◆ top picks only**.
+- **Top picks:** ◇/◆ beside the star (every day card, the moment page) marks a photo as one of your very best. **A top pick is always a favorite**: one click on ◆ makes it both (and shows its moment on the Library page), so it has its highlights copy too. Un-marking ◆ leaves it a favorite; un-starring ☆ removes both. Each top pick also gets the same 2048px copy in **`top_picks/`**, but **flat**: just `<name>.jpg` in one folder with no year/day levels (names are unique), so the whole set is easy to copy or show off. `top_picks/` is kept in sync exactly like `highlights/` (table `top_picks`; `favorites.top` marks them) and `psort top-picks [--out DIR] [--originals]` syncs it and copies the set, flat, to any folder (web-size JPEGs, or the original files with `--originals`; files already there are left alone).
 - **`highlights/`** holds a 2048px, upright, GPS-free JPEG of each favorite, at the **same folder path and filename** as its original (without any `_alternates`/`_duplicates` level). Each copy's Windows **Title/Subject** is `psort library: <original path>`, and its **Tags** are people plus psort tags.
 - **Kept in sync:**
   - un-favoriting removes the copy
@@ -254,7 +256,7 @@ a_library/
 - **`psort review`** starts Flask on **127.0.0.1:5000**, with no login. Requests whose Host isn't localhost are refused, and every change needs a per-launch token (a Jinja global, so imported macros see it). Dark mode is the default, with a light toggle remembered per browser.
 - **Errors:** Flask runs with debug off, so an unexpected exception would normally just show a bare "Internal Server Error." A global handler instead logs the full traceback to the terminal running `psort review` and shows a short message (with the exception type and text) as a flash on the page you were on, or an error page for a broken link.
 - **Pages:**
-  - **Library:** three views, chosen with buttons and remembered in the `psort-library-view` cookie: **Years & months** (collapsible years and months, each with a collage of up to 6 photos / one per moment, day counts, a mini progress bar and an "N to review" badge; open/closed state is remembered, **Expand all / Collapse all**), **List** (month headings), and **Calendar** (a heatmap, one square per day: green reviewed, amber changed since review, blue not reviewed, grey no photos; click a square to open the day). A sticky **year jump bar** and an **Only days needing review** filter (remembered) apply to all views. Days show counts, close calls, 🎬 and a colored status badge (✓ reviewed, **pics added** / **moments updated** amber, • new), plus an overall **progress bar** (days and photos reviewed vs. the whole library). A remembered **Show day thumbnails** toggle shows, under each day, the best shot of every moment you ticked **show on Library** on that day's page (up to 12 per day, then "+N more"; hidden thumbnails aren't loaded).
+  - **Library:** five views, chosen with buttons and remembered in the `psort-library-view` cookie: **Years & months** (collapsible years and months, each with a collage of up to 6 photos / one per moment, day counts, a mini progress bar and an "N to review" badge; open/closed state is remembered, **Expand all / Collapse all**), **List** (month headings), and **Calendar** (a heatmap, one square per day: green reviewed, amber changed since review, blue not reviewed, grey no photos; click a square to open the day). **★ Favorites (n)** and **◆ Top picks (n)** show only the photos you picked, by year then month (no best-shot stand-ins for days without picks), newest year first with a jump bar; click one to open its moment. Review-progress controls don't apply to those two. A sticky **year jump bar** and an **Only days needing review** filter (remembered) apply to all views. Days show counts, close calls, 🎬 and a colored status badge (✓ reviewed, **pics added** / **moments updated** amber, • new), plus an overall **progress bar** (days and photos reviewed vs. the whole library). A remembered **Show day thumbnails** toggle shows, under each day, the best shot of every moment you ticked **show on Library** on that day's page (up to 12 per day, then "+N more"; hidden thumbnails aren't loaded).
   - **Day/event:** best shots with badges (shots, duplicates, close call, ◉ Live, ◈ Rich, in tray, people, tags, posted in), ☆ favorite, tick → **Delete ticked** or **Combine selected moments**, 🎬 videos, **Mark day reviewed**, and **Mark reviewed & return to Library**. Photo cards show each shot's width × height, and default to **Fit** (uncropped); a remembered **Fill** mode crops to the card frame. Filter the visible picks by identified person, close calls, favorites, or photos with no identified people; **All** resets the view and **Toggle all filters** selects or clears all specific filters. A starred shot that isn't its moment's best is a **favorite alternate**: it's hidden normally and shown, labeled, only with the **Favorites** filter. Combining moments carries a **show on Library** pin over to the merged moment. Starring a photo also ticks its moment's **show on Library** box (un-starring leaves it as is). Zoom controls resize photo panels and reflow the grid; sizes are remembered per view.
   - **Day status:** each day is **new** (never reviewed), **reviewed**, **pics added**, or **moments updated**. Marking a day reviewed stores a fingerprint of its photo set and of how those photos are grouped into moments (`daystatus.py`); status is derived by comparing that fingerprint with the day as it is now. So a `psort run` that adds photos to a day, or re-clusters it (e.g. after changing `[cluster]` settings), flags just that day, and days whose photos and grouping didn't change stay reviewed — nothing is reset during a run. Clicking **Mark day reviewed** on a flagged day re-marks it as it is now. Your own combine/split/delete on a reviewed day re-marks it afterward, so your edits don't flag it. Favorites, picks and pins aren't part of the fingerprint. Days marked reviewed by an older psort are fingerprinted (as they are at that moment) by the next command or review start, before any re-clustering.
   - **Day navigation:** a breadcrumb (Library › year › month › day) and one toolbar of matching buttons in three groups: **← Library** (back to that month), **‹ Previous day / Next day ›**, **« Previous unreviewed / Next unreviewed »** (any status but reviewed; labels show the destination date); and, for an unreviewed day, **✓ Mark day reviewed**, **✓ & back to Library**, **✓ & « previous unreviewed** and **✓ & next unreviewed »**. Unavailable directions are shown disabled. The moment page uses the same breadcrumb. Each best-shot card has a **show on Library** checkbox (stored per moment in `library_pins`).
@@ -263,7 +265,7 @@ a_library/
     - ☆, tray, tags, fix date, 🗑 delete
     - Detected faces beside their photo: **Not <name>**, **Ignore face**, **Un-ignore face**, and add/change identification
     - play the Live clip
-  - **★ Favorites** (year/person filters) · **Close calls** ("Pick this" or confirm "Keep this as best") · **Events** (name/through/unname) · **Faces** (name groups; person pages with "Not <name>") · **Videos** · **Undated** (exact date per photo, or **one date for all ticked**) · **🗑 Trash** (Restore / Empty) · **Post tray** (the composer, §8)
+  - **★ Favorites** (year/person filters, **◆ top picks only**) · **Close calls** ("Pick this" or confirm "Keep this as best") · **Events** (name/through/unname) · **Faces** (name groups; person pages with "Not <name>") · **Videos** · **Undated** (exact date per photo, or **one date for all ticked**) · **🗑 Trash** (Restore / Empty) · **Post tray** (the composer, §8)
 - Every decision updates the library right away (files move, folders rename), along with highlights.
 - **Clicks stay fast:** a decision re-scores in memory and moves only the files it affects. Files that aren't moving are trusted from the database rather than re-checked on disk. Checking all ~10,000 library files on OneDrive took about 2 minutes per click; now a click takes about 0.2 s. `psort run` still verifies every file.
 - **`manifest.json`** (about 10 MB) is written in the background 4 s after the last change, and again when the review page stops.
@@ -320,7 +322,8 @@ Run with `uv run psort …` from the repo.
 | `close-calls` | Lists near-tie moments |
 | `events` · `events name <id> <name> [--through <id>]` · `events unname <name>` | Events (§5.6) |
 | `faces list` · `crops` · `label <name> --group/--face` · `unlabel --face` · `ignore --face` · `unignore --face` · `scan` | Faces from the command line (§5.7) |
-| `highlights` | Syncs `highlights/` (also part of `run`) |
+| `highlights` | Syncs `highlights/` and `top_picks/` (also part of `run`) |
+| `top-picks [--out DIR] [--originals]` | Syncs `top_picks/`, and optionally copies the top picks, flat, to DIR (web-size, or full-resolution originals) (§5.9) |
 | `export <post> [names…] [--keep-tray]` | Export only (§7) |
 | `blog-login` | Saves and tests the FTPS login (§8) |
 | `reconcile [--apply]` | Repairs records after hand edits (§5.11) |
@@ -372,6 +375,7 @@ Run with `uv run psort …` from the repo.
 - **2026-10-01 (evening):** day review status is now derived from a stored fingerprint (new / reviewed / pics added / moments updated), replacing the old "drop the reviewed row when a new photo lands"; day pages got previous/next and previous/next-unreviewed navigation; and moments can be pinned to show a thumbnail beside their day on the Library page (§6).
 - **2026-10-02:** Library redesign (Years & months / List / Calendar views, year jump bar, only-days-needing-review filter, collages), day-page breadcrumb and matching toolbar with destination dates and a **✓ & « previous unreviewed** button (§6); `psort restore [--relocate]` and `psort relocate` for moving to a new computer (§9); a missing inbox is skipped with a warning instead of aborting the run (§2).
 - **2026-10-04:** TIFF, GIF and WebP are photos now (files already in `unsorted_files/` move to the library on the next run, §3); `psort recover` and an end-of-run offer re-save unreadable images as new photos (§5.13); `psort restore`/`relocate` and missing-inbox handling from 2026-10-02 are described in §2 and §9.
+- **2026-10-05:** **◆ top picks** (§5.9): a ranked-higher favorite, kept flat in `top_picks/`, with `psort top-picks --out DIR` to export; the Library page gained **★ Favorites** and **◆ Top picks** views (every pick by year and month, each linking to its moment); the browse manifest flags top picks (`"top": true`) and the blog's browse page got a **Top picks only** filter.
 
 ### Backlog and ideas (not built)
 - **People filter** on day pages and in search, beyond Favorites. Optionally, favor shots where family faces are sharp.
@@ -400,7 +404,7 @@ Run with `uv run psort …` from the repo.
 | `rich.py` | Rich Capture package reading and frame extraction |
 | `events.py` | Event suggestions and named ranges; `slugify` |
 | `faces.py` | Face scan, grouping (kNN + connected components), label/unlabel/ignore with rejections, crops |
-| `highlights.py` | Favorites and the `highlights/` sync |
+| `highlights.py` | Favorites, top picks, and the `highlights/` + `top_picks/` sync and export |
 | `trash.py` | Delete/restore/empty trash, companions |
 | `reconcile.py` | Repairing records after hand edits |
 | `recover.py` | Re-saving unreadable images (§5.13) |

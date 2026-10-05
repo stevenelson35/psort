@@ -70,6 +70,9 @@
       {% if s.rich_frame %}<span class="pill" title="A frame from a Nokia Rich Capture package">◈ {{ s.rich_frame }} frame</span>{% endif %}
       {{ post(url_for('favorite', sha=s.sha256), "★ Favorite" if s.favorite else "☆ Add to favorites",
               "star on" if s.favorite else "star") }}
+      {{ post(url_for('top_pick', sha=s.sha256), "◆ Top pick" if s.top_pick else "◇ Make a top pick",
+              "star top on" if s.top_pick else "star top",
+              title="Remove from top picks (stays a favorite)" if s.top_pick else "Top pick: also a favorite, and copied flat to top_picks/") }}
       {% if s.is_best %}<span class="pill ok">★ best</span>{% endif %}
       {% if s.duplicate_of %}<span class="pill">duplicate of {{ s.copy_of }}</span>
         <span class="muted">Same picture saved again. psort kept the better copy; this one is in _duplicates.</span>

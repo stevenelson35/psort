@@ -158,6 +158,13 @@ CREATE TABLE IF NOT EXISTS highlights (
     stamp     TEXT NOT NULL            -- what it was rendered from; re-rendered when this changes
 );
 
+-- Web-size copies of top picks that psort has written, flat, to top_picks/ (same idea as highlights).
+CREATE TABLE IF NOT EXISTS top_picks (
+    sha256    TEXT PRIMARY KEY,
+    path      TEXT NOT NULL,           -- relative to the top_picks root (just a file name)
+    stamp     TEXT NOT NULL
+);
+
 -- Photos picked for the next blog post, in post order.
 CREATE TABLE IF NOT EXISTS tray (
     sha256    TEXT PRIMARY KEY REFERENCES photos(sha256),
@@ -216,6 +223,7 @@ _ADDED_COLUMNS = [
     ("photos", "duplicate_of", "TEXT"),
     ("tray", "position", "INTEGER NOT NULL DEFAULT 0"),
     ("faces", "ignored", "INTEGER NOT NULL DEFAULT 0"),
+    ("favorites", "top", "INTEGER NOT NULL DEFAULT 0"),  # a top pick is always a favorite too
     ("reviewed", "photos_sig", "TEXT"),
     ("reviewed", "moments_sig", "TEXT"),
     ("reviewed", "photo_count", "INTEGER"),

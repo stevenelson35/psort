@@ -36,7 +36,7 @@ MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 
 BACKUP_DIR = Path.home() / "psort-backups"  # where `psort backup` / the Backup page save archives
 MAX_DAY_THUMBS = 12  # pinned moment thumbnails shown per day on the Library page; the rest are counted
 MONTH_COVER = 6  # photos in a month's cover collage on the Library page
-LIBRARY_VIEWS = ("grouped", "list", "calendar")
+LIBRARY_VIEWS = ("grouped", "list", "calendar", "favorites", "top")
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -188,9 +188,13 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         ):
             thumbs[folder_key(r["library_path"])].append(r)
         overview = library_overview(db(), all_folders, with_calendar=view == "calendar")
+        counts = db().execute("SELECT COUNT(*) AS favorites, COALESCE(SUM(top), 0) AS top FROM favorites f "
+                              "JOIN photos p ON p.sha256 = f.sha256 WHERE p.library_path IS NOT NULL").fetchone()
+        gallery = picks_gallery(db(), top_only=view == "top") if view in ("favorites", "top") else None
         resp = make_response(render_template(
-            "index.html", overview=overview, stats=stats, progress=progress, thumbs=thumbs,
-            max_thumbs=MAX_DAY_THUMBS, view=view, todo_count=progress["folders"] - progress["folders_done"]))
+            "index.html", overview=overview, stats=stats, progress=progress, thumbs=thumbs, gallery=gallery,
+            counts=counts, max_thumbs=MAX_DAY_THUMBS, view=view,
+            todo_count=progress["folders"] - progress["folders_done"]))
         if request.args.get("view") in LIBRARY_VIEWS:
             resp.set_cookie("psort-library-view", view, max_age=365 * 86400, samesite="Lax")
         return resp
@@ -468,26 +472,31 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     def favorite(sha):
         return act(actions.toggle_favorite, cfg, db(), sha)
 
+    @app.post("/photo/<sha>/top")
+    def top_pick(sha):
+        return act(actions.toggle_top_pick, cfg, db(), sha)
+
     @app.get("/favorites")
     def favorites():
         year = request.args.get("year", "")
         person = request.args.get("person", "")
+        top = request.args.get("top", "") == "1"
         rows = db().execute(
             f"""SELECT {CARD_COLUMNS}, p.taken_at, h.path AS highlight FROM photos p
                 JOIN favorites fav ON fav.sha256 = p.sha256
                 LEFT JOIN highlights h ON h.sha256 = p.sha256
-                WHERE (? = '' OR substr(p.taken_at, 1, 4) = ?)
+                WHERE (? = 0 OR fav.top = 1) AND (? = '' OR substr(p.taken_at, 1, 4) = ?)
                   AND (? = '' OR EXISTS (SELECT 1 FROM faces f JOIN people pe ON pe.id = f.person_id
                                          WHERE f.sha256 = p.sha256 AND pe.name = ?))
                 ORDER BY p.taken_at DESC, p.name""",
-            (year, year, person, person),
+            (int(top), year, year, person, person),
         ).fetchall()
         years = [r[0] for r in db().execute(
             "SELECT DISTINCT substr(p.taken_at, 1, 4) FROM photos p JOIN favorites f ON f.sha256 = p.sha256 ORDER BY 1 DESC")]
         people = [r[0] for r in db().execute(
             """SELECT DISTINCT pe.name FROM favorites fav JOIN faces f ON f.sha256 = fav.sha256
                JOIN people pe ON pe.id = f.person_id ORDER BY pe.name""")]
-        return render_template("favorites.html", photos=rows, years=years, people=people, year=year, person=person,
+        return render_template("favorites.html", photos=rows, years=years, people=people, year=year, person=person, top=top,
                                root=windows_path(cfg.highlights), library=windows_path(cfg.library))
 
     @app.post("/photo/<sha>/tray")
@@ -690,6 +699,7 @@ CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.cl
     (SELECT c.sha256 FROM live_clips c JOIN sources s ON s.path = c.photo_path
         WHERE s.sha256 = p.sha256 LIMIT 1) AS live_clip,
     EXISTS (SELECT 1 FROM favorites fv WHERE fv.sha256 = p.sha256) AS favorite,
+    EXISTS (SELECT 1 FROM favorites fv WHERE fv.sha256 = p.sha256 AND fv.top = 1) AS top_pick,
     EXISTS (SELECT 1 FROM rich_packages r JOIN sources rs ON rs.path = r.photo_path
             WHERE rs.sha256 = p.sha256) AS rich,
     (SELECT COALESCE(d.label, d.member) FROM derived_frames d WHERE d.sha256 = p.sha256) AS rich_frame"""
@@ -709,6 +719,34 @@ def pretty_folder(key: str) -> tuple[str, str]:
         return datetime.strptime(name[:7], "%Y-%m").strftime("%B %Y"), "day unknown"
     day, _, slug = name.partition("_")
     return datetime.strptime(day, "%Y-%m-%d").strftime("%a %-d %b %Y"), slug.replace("-", " ")
+
+
+def picks_gallery(conn: sqlite3.Connection, top_only: bool) -> dict:
+    """Every favorite (or only top picks), by year then month, each linking to its moment. Only
+    photos you picked: no best-shot stand-ins for days that have none."""
+    years: dict[str, dict[str, list[dict]]] = {}
+    undated: list[dict] = []
+    count = 0
+    for r in conn.execute(
+        f"""SELECT p.sha256, p.name, p.moment_id, p.library_path, p.taken_at, fav.top FROM favorites fav
+            JOIN photos p ON p.sha256 = fav.sha256 WHERE p.library_path IS NOT NULL
+            {"AND fav.top = 1" if top_only else ""} ORDER BY p.taken_at, p.name"""
+    ):
+        count += 1
+        parts = r["library_path"].split("/")
+        when = datetime.fromisoformat(r["taken_at"])
+        item = {**dict(r), "label": f"{when:%a} {when.day} {when:%b %Y}"}
+        if parts[0] == "_undated":
+            undated.append(item)
+        else:
+            years.setdefault(parts[0], {}).setdefault(parts[1][:7], []).append(item)
+    return {
+        "count": count,
+        "years": [{"year": y, "count": sum(len(v) for v in months.values()),
+                   "months": [{"month": m, "label": month_label(m), "photos": photos} for m, photos in sorted(months.items())]}
+                  for y, months in sorted(years.items(), reverse=True)],
+        "undated": undated,
+    }
 
 
 def month_label(month: str) -> str:

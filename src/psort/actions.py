@@ -260,6 +260,21 @@ def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
     return now
 
 
+def toggle_top_pick(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
+    """Mark / unmark a top pick (◆). Marking one also makes it a favorite (highlights/ copy, moment
+    shown on the Library page); unmarking leaves it a favorite. Its flat top_picks/ copy follows."""
+    try:
+        now = highlights.toggle_top(conn, sha)
+    except highlights.HighlightError as e:
+        raise ActionError(str(e)) from e
+    if now:
+        conn.execute("INSERT OR IGNORE INTO library_pins (moment_id) SELECT moment_id FROM photos WHERE sha256 = ?",
+                     (sha,))
+        conn.commit()
+    refresh(cfg, conn)
+    return now
+
+
 def delete_photos(cfg: Config, conn: sqlite3.Connection, shas: list[str]) -> int:
     """Move photos to library/_trash (restorable); they're never copied back from the inbox."""
     marks = ",".join("?" * len(shas)) or "''"

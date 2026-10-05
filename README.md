@@ -1,6 +1,6 @@
 # psort
 
-Local photo curation. psort removes duplicates, groups near-identical bursts into moments, picks the best shot of each, and builds a private, date-organized library. It keeps videos, Live Photo clips and Nokia Rich Capture packages alongside, lets you star favorites into an automatic `highlights/` folder, and can publish posts straight to the Jekyll blog.
+Local photo curation. psort removes duplicates, groups near-identical bursts into moments, picks the best shot of each, and builds a private, date-organized library. It keeps videos, Live Photo clips and Nokia Rich Capture packages alongside, lets you star favorites into an automatic `highlights/` folder (and mark a few ◆ top picks into a flat `top_picks/` folder), and can publish posts straight to the Jekyll blog.
 
 **Docs:** [DESIGN.md](DESIGN.md) is the full spec. Its §12 "Status & Handoff" is the place to start when picking the project up. [CLAUDE.md](CLAUDE.md) has notes for coding agents.
 
@@ -25,7 +25,7 @@ The database is essential to preserving analysis and review decisions. The libra
 
 1. On the old computer, `uv run psort backup` and copy the `psort-backup-*.tar.gz` (default folder `~/psort-backups/`) to the new one, along with the library, every input directory, and the `videos/`, `unsorted_files/` and `highlights/` directories.
 2. On the new computer, install Python 3.12+ and `uv`, clone this repository and run `uv sync`.
-3. Run `uv run psort restore psort-backup-….tar.gz --relocate`. It shows each path from the old `psort.toml` (each input directory in order, library, outbox, videos, unsorted, highlights, state directory), marks the ones that don't exist here, and lets you type a new path or press Enter to keep one. Nothing is overwritten unless you add `--force`, and then the old files are moved aside, not deleted. Use `uv run psort relocate` any time later to fix paths again.
+3. Run `uv run psort restore psort-backup-….tar.gz --relocate`. It shows each path from the old `psort.toml` (each input directory in order, library, outbox, videos, unsorted, highlights, top picks, state directory), marks the ones that don't exist here, and lets you type a new path or press Enter to keep one. Nothing is overwritten unless you add `--force`, and then the old files are moved aside, not deleted. Use `uv run psort relocate` any time later to fix paths again.
 4. Run `uv run psort status`, then `uv run psort run` and `uv run psort verify`.
 
 Keep input directories in the same order (never delete or reorder entries): the database records each file's input by its position. If an input directory no longer exists, leave its entry in place; psort warns `Inbox N not found, skipped` and carries on with the others. The manual steps follow, if you'd rather not use `restore`:
@@ -50,8 +50,9 @@ In the review UI you can:
 - pick best shots and resolve close calls, or combine/split moments by hand when bursts should (or shouldn't) be grouped together
 - name events and faces, and fix dates, one photo at a time or many at once
 - identify, correct, or ignore a detected face right from its photo, not just from the Faces pages
-- star favorites (preferred automatically as a moment's best shot over the plain top score) and delete junk (it goes to a trash you can restore from)
+- star favorites (preferred automatically as a moment's best shot over the plain top score), mark ◆ top picks (always favorites too; copied flat to `top_picks/`), and delete junk (it goes to a trash you can restore from)
 - filter day pages by person, close call, or no identified people, and zoom photo panels larger or smaller
+- see every ★ favorite or ◆ top pick by year, each linking back to its moment, from the Library page's Favorites / Top picks views
 - browse the Library by years and months (collapsible, with photo collages), as a list, or as a calendar heatmap; jump by year, or show only days still needing review
 - move through days with a breadcrumb and one toolbar: previous/next day, previous/next unreviewed day, and "✓ & next/previous unreviewed" to finish a day and keep going
 - write blog posts in the Post tray, then Preview, Dry run, or Publish
@@ -65,7 +66,8 @@ uv run psort export <post>          # "export only" to the outbox, for blogupdat
 uv run psort reconcile [--apply]    # after moving/renaming/deleting library files by hand
 uv run psort empty-trash            # permanently delete trashed photos
 uv run psort recover [--yes] [--retry]   # re-save unreadable/truncated images as new library photos (originals stay); `run` offers it too
-uv run psort highlights             # sync highlights/ with ★ favorites (also part of run)
+uv run psort highlights             # sync highlights/ and top_picks/ with your ★ favorites and ◆ top picks (also part of run)
+uv run psort top-picks --out DIR [--originals]   # copy the ◆ top picks, flat, to DIR (web-size, or originals)
 uv run psort close-calls            # list near-tie moments
 uv run psort events | events name <id> <name> [--through <id>] | events unname <name>
 uv run psort faces list | crops | label <name> --group <id> | unlabel --face <id> | ignore --face <id> | unignore --face <id>
