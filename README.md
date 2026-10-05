@@ -68,11 +68,10 @@ uv run psort highlights             # sync highlights/ with ★ favorites (also 
 uv run psort close-calls            # list near-tie moments
 uv run psort events | events name <id> <name> [--through <id>] | events unname <name>
 uv run psort faces list | crops | label <name> --group <id> | unlabel --face <id> | ignore --face <id> | unignore --face <id>
-uv run psort backup [--out DIR]            # archive config + state (database, face models)
+uv run psort backup [--out DIR] [--include-caches]    # archive config + state (DB, face models) to a dated .tar.gz; caches skipped unless asked
 uv run psort restore <archive> --relocate  # restore a backup on a new computer, fixing paths as you go
 uv run psort relocate                      # review/edit the paths in psort.toml
 uv run psort publish-browse [--dry-run]    # publish favorites + manifest for the browse page, with a CORS rule for the blog origin
-uv run psort backup [--out DIR] [--include-caches]    # archive the config + state directories (DB, face models) to a dated .tar.gz
 ```
 
 psort never writes to the inbox, and every inbox file ends up copied somewhere, except OS cache files. Delete a batch yourself once `psort verify` says it's safe.
