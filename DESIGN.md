@@ -314,7 +314,7 @@ Run with `uv run psort …` from the repo.
 | Command | Does |
 |---|---|
 | `init --inbox … [--inbox …] --library … --outbox …` | Creates `psort.toml` and the DB, and downloads the face models (`--no-face-model` skips them) |
-| `run [--dry-run]` | The six steps with progress. `--dry-run` shows planned copies and moves without touching the library (the DB is still updated) |
+| `run [--dry-run]` | The six steps with progress. `--dry-run` shows planned copies and moves without touching the library (the DB is still updated). **Only one `run` at a time:** it holds an OS lock on `<state_dir>/run.lock` (released however the process ends, even `kill -9`; a run paused with Ctrl+Z still holds it), and a second `run` refuses to start, naming the other's process id. The review UI isn't blocked |
 | `ingest` / `cluster` / `score` / `curate [--dry-run]` | Single steps |
 | `status` | Totals, including undated, close calls, trash, videos, Rich Capture, favorites and "not copied yet" |
 | `verify [batch] [--all]` | Safe-to-delete report (§5.5) |
@@ -376,6 +376,7 @@ Run with `uv run psort …` from the repo.
 - **2026-10-02:** Library redesign (Years & months / List / Calendar views, year jump bar, only-days-needing-review filter, collages), day-page breadcrumb and matching toolbar with destination dates and a **✓ & « previous unreviewed** button (§6); `psort restore [--relocate]` and `psort relocate` for moving to a new computer (§9); a missing inbox is skipped with a warning instead of aborting the run (§2).
 - **2026-10-04:** TIFF, GIF and WebP are photos now (files already in `unsorted_files/` move to the library on the next run, §3); `psort recover` and an end-of-run offer re-save unreadable images as new photos (§5.13); `psort restore`/`relocate` and missing-inbox handling from 2026-10-02 are described in §2 and §9.
 - **2026-10-05:** **◆ top picks** (§5.9): a ranked-higher favorite, kept flat in `top_picks/`, with `psort top-picks --out DIR` to export; the Library page gained **★ Favorites** and **◆ Top picks** views (every pick by year and month, each linking to its moment); the browse manifest flags top picks (`"top": true`) and the blog's browse page got a **Top picks only** filter.
+- **2026-10-06:** `psort run` refuses to start while another `run` is active (a run had been left paused with Ctrl+Z while a second one ran for 17 hours) (§9).
 
 ### Backlog and ideas (not built)
 - **People filter** on day pages and in search, beyond Favorites. Optionally, favor shots where family faces are sharp.

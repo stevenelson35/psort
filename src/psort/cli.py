@@ -1,10 +1,12 @@
 """Command-line interface (DESIGN.md §9)."""
 
 import dataclasses
+import fcntl
 import os
 import sqlite3
 import sys
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
@@ -239,6 +241,35 @@ def run(
     if len(missing) == len(cfg.input_roots):
         typer.secho("Inbox not found: " + ", ".join(f"{i}: {root}" for i, root in missing), fg="red", err=True)
         raise typer.Exit(1)
+    with _run_lock(cfg):
+        _run_pipeline(cfg, conn, dry_run, recover)
+
+
+@contextmanager
+def _run_lock(cfg: Config):
+    """Only one `psort run` at a time: two would plan from the same state and copy or move the same
+    files. An OS lock (not a marker file) so it's released however the process ends, even kill -9;
+    a run paused with Ctrl+Z still holds it."""
+    path = cfg.state_dir / "run.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            f.seek(0)
+            pid = f.read().strip() or "?"
+            typer.secho(f"Another `psort run` is already running (process {pid}); not starting a second one.\n"
+                        "If it's paused (Ctrl+Z), resume it with `fg` in its terminal, or end it with "
+                        f"`kill -9 {pid}` (safe: unfinished work is rolled back).", fg="red", err=True)
+            raise typer.Exit(1) from None
+        f.seek(0)
+        f.truncate()
+        f.write(str(os.getpid()))
+        f.flush()
+        yield
+
+
+def _run_pipeline(cfg: Config, conn: sqlite3.Connection, dry_run: bool, recover: bool | None) -> None:
     _warn_missing_inboxes(cfg)
     # One progress display for the whole run, showing from the very first moment: just looking at a
     # big inbox on a Windows drive takes a minute or more. Step sizes are filled in once known.

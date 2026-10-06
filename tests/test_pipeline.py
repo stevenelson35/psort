@@ -305,3 +305,42 @@ def test_reordered_inboxes_never_duplicate_or_lose_photos(psort, tmp_path, sampl
     psort("run")
     sources, photos, files = _snapshot(tmp_path)
     assert photos == before[1] and files == before[2]
+
+
+def test_run_refuses_to_start_while_another_run_holds_the_lock(psort, tmp_path):
+    import fcntl
+    import os
+    import subprocess
+    import sys
+
+    lock = tmp_path / "state" / "run.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("4242")
+    holder = subprocess.Popen(  # another process holding the lock, like a run paused with Ctrl+Z
+        [sys.executable, "-c", "import fcntl, sys, time; f = open(sys.argv[1], 'a+'); "
+         "fcntl.flock(f, fcntl.LOCK_EX); print('locked', flush=True); time.sleep(60)", str(lock)],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        out = psort("run", expect=1).output
+        assert "Another `psort run` is already running (process 4242)" in out and "kill -9 4242" in out
+        assert not (tmp_path / "library").exists() or not any((tmp_path / "library").rglob("*.jpg"))
+    finally:
+        holder.kill()
+        holder.wait()
+
+    assert "Ingest:" in psort("run").output  # released the moment the other process ended
+    assert lock.read_text() == str(os.getpid())
+    with lock.open("a+") as f:  # and this run let go of it when it finished
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_lock_is_released_even_when_a_run_fails(psort, tmp_path, sample_inbox, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("disk vanished")
+
+    monkeypatch.setattr("psort.cli._cluster", boom)
+    result = psort("run", expect=1)
+    assert isinstance(result.exception, RuntimeError)
+    monkeypatch.undo()
+    assert "Ingest:" in psort("run").output
