@@ -71,17 +71,27 @@ def highlight_path(library_path: str, name: str) -> str:
     return "/".join([*parts, f"{name}.jpg"])
 
 
-def _wanted(conn: sqlite3.Connection, top_only: bool = False) -> dict[str, tuple[str, str, str, list[str]]]:
+def _only(shas: set[str] | None, column: str) -> tuple[str, list[str]]:
+    """An SQL condition (and parameters) limiting a query to some photos; all when None."""
+    if shas is None:
+        return "", []
+    return f"AND {column} IN ({','.join('?' * len(shas)) or 'NULL'})", sorted(shas)
+
+
+def _wanted(conn: sqlite3.Connection, top_only: bool = False,
+            shas: set[str] | None = None) -> dict[str, tuple[str, str, str, list[str]]]:
     """sha256 → (copy path, stamp, library path, keywords) for every favorite in the library, or
-    every top pick (flat: just `<name>.jpg`; names are unique)."""
+    every top pick (flat: just `<name>.jpg`; names are unique). `shas` limits it to those photos."""
     wanted = {}
+    only, params = _only(shas, "p.sha256")
     rows = conn.execute(
         f"""SELECT p.sha256, p.name, p.library_path,
                   (SELECT group_concat(name, ';') FROM (SELECT DISTINCT pe.name FROM faces f
                       JOIN people pe ON pe.id = f.person_id WHERE f.sha256 = p.sha256 ORDER BY pe.name)) AS people,
                   (SELECT group_concat(tag, ';') FROM (SELECT tag FROM tags WHERE sha256 = p.sha256 ORDER BY tag)) AS tags
            FROM favorites fav JOIN photos p ON p.sha256 = fav.sha256 WHERE p.library_path IS NOT NULL
-           {"AND fav.top = 1" if top_only else ""} ORDER BY p.name, p.sha256"""
+           {"AND fav.top = 1" if top_only else ""} {only} ORDER BY p.name, p.sha256""",
+        params,
     ).fetchall()
     for r in rows:
         keywords = [k for k in (r["people"] or "").split(";") + (r["tags"] or "").split(";") if k]
@@ -99,17 +109,22 @@ class SyncStats:
     top: "SyncStats | None" = None  # the same counts for top_picks/
 
 
-def sync(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = lambda _: None) -> SyncStats:
-    """Make highlights/ match the favorites and top_picks/ match the top picks (for the files psort wrote)."""
-    stats = _sync_folder(cfg, conn, cfg.highlights, "highlights", _wanted(conn), "highlight", log)
-    stats.top = _sync_folder(cfg, conn, cfg.top_picks, "top_picks", _wanted(conn, top_only=True), "top pick", log)
+def sync(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = lambda _: None,
+         shas: set[str] | None = None) -> SyncStats:
+    """Make highlights/ match the favorites and top_picks/ match the top picks (for the files psort
+    wrote). `shas` limits it to those photos, for a review click: checking every copy on OneDrive
+    is `psort run`'s job."""
+    stats = _sync_folder(cfg, conn, cfg.highlights, "highlights", _wanted(conn, shas=shas), "highlight", log, shas)
+    stats.top = _sync_folder(cfg, conn, cfg.top_picks, "top_picks", _wanted(conn, top_only=True, shas=shas),
+                             "top pick", log, shas)
     return stats
 
 
 def _sync_folder(cfg: Config, conn: sqlite3.Connection, root: Path, table: str, wanted: dict,
-                 label: str, log: Callable[[str], None]) -> SyncStats:
+                 label: str, log: Callable[[str], None], shas: set[str] | None = None) -> SyncStats:
     stats = SyncStats()
-    have = {r["sha256"]: r for r in conn.execute(f"SELECT * FROM {table}")}
+    only, params = _only(shas, "sha256")
+    have = {r["sha256"]: r for r in conn.execute(f"SELECT * FROM {table} WHERE 1 {only}", params)}
 
     for sha, row in have.items():  # no longer wanted (or its original is gone)
         if sha not in wanted:

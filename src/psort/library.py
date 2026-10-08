@@ -37,6 +37,8 @@ class CurateStats:
 def assign_names(conn: sqlite3.Connection) -> None:
     """Give each new photo a permanent library name, YYYYMMDD_HHMMSS[_n]. Names never change once
     assigned, so a name used on the blog keeps pointing at the same photo."""
+    if not conn.execute("SELECT 1 FROM photos WHERE name IS NULL LIMIT 1").fetchone():
+        return  # the usual case for a review click: skip reading 100,000 names
     taken = {r["name"] for r in conn.execute("SELECT name FROM photos WHERE name IS NOT NULL")}
     # Same-second photos are numbered in original-filename order, which follows the burst sequence.
     rows = conn.execute(
@@ -55,12 +57,21 @@ def assign_names(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def desired_paths(conn: sqlite3.Connection) -> dict[str, str]:
-    """sha256 → library-relative path, from the current moments and best picks."""
+def desired_paths(conn: sqlite3.Connection, moments: set[str] | None = None) -> dict[str, str]:
+    """sha256 → library-relative path, from the current moments and best picks (for every photo,
+    or just those in `moments`: a photo's path depends only on its own moment)."""
+    from .moments import _in_moments
+
+    where, params = _in_moments(moments, "moment_id")
     rows = conn.execute(
-        "SELECT sha256, name, ext, taken_at, date_source, moment_id, is_best, duplicate_of FROM photos"
+        f"SELECT sha256, name, ext, taken_at, date_source, moment_id, is_best, duplicate_of FROM photos WHERE {where}",
+        params,
     ).fetchall()
     names = {r["sha256"]: r["name"] for r in rows}
+    if stray := {r["duplicate_of"] for r in rows if r["duplicate_of"] and r["duplicate_of"] not in names}:
+        # A stale pointer to a copy outside these moments (normal runs fix those); still name it.
+        names |= {r[0]: r[1] for r in conn.execute(
+            f"SELECT sha256, name FROM photos WHERE sha256 IN ({','.join('?' * len(stray))})", sorted(stray))}
     best = {r["moment_id"]: r for r in rows if r["is_best"]}
     ranges = named_ranges(conn)
     paths = {}
@@ -116,16 +127,25 @@ def day_of(target: str) -> str | None:
 def curate(
     cfg: Config, conn: sqlite3.Connection, dry_run: bool = False, log: Callable[[str], None] = print,
     progress: Callable[[int, int], None] | None = None, check_files: bool = True,
+    moments: set[str] | None = None,
 ) -> CurateStats:
     """Copy or move files so the library matches the database. check_files=False trusts the
     database for files that aren't moving: checking ~10,000 files on a Windows/OneDrive drive takes
-    minutes, fine for `psort run` but not for a click in the review UI."""
+    minutes, fine for `psort run` but not for a click in the review UI. `moments` limits this to
+    the photos (and their Live clips / Rich packages) in those moments, for a review click that
+    changed only them; videos and unsorted files don't depend on moments, so they're left alone."""
     assign_names(conn)
     stats = CurateStats()
     lib = cfg.library
-    current = {r["sha256"]: r for r in conn.execute("SELECT sha256, name, library_path FROM photos")}
+    desired_by_sha = desired_paths(conn, moments)
+    if moments is None:
+        current = {r["sha256"]: r for r in conn.execute("SELECT sha256, name, library_path FROM photos")}
+    else:
+        marks = ",".join("?" * len(desired_by_sha)) or "NULL"
+        current = {r["sha256"]: r for r in conn.execute(
+            f"SELECT sha256, name, library_path FROM photos WHERE sha256 IN ({marks})", list(desired_by_sha))}
 
-    desired = sorted(desired_paths(conn).items(), key=lambda kv: kv[1])
+    desired = sorted(desired_by_sha.items(), key=lambda kv: kv[1])
     for i, (sha, target) in enumerate(desired):
         if progress:
             progress(i, len(desired))
@@ -169,6 +189,15 @@ def curate(
             conn.execute("UPDATE photos SET library_path = ? WHERE sha256 = ?", (target, sha))
             conn.commit()
 
+    if moments is not None:
+        # Live Photo clips and Rich Capture packages follow their photo; only these photos moved.
+        for table, paths, label in (("live_clips", _clip_paths(conn, set(desired_by_sha)), "Live Photo clip"),
+                                    ("rich_packages", _rich_paths(conn, set(desired_by_sha)), "Rich Capture package")):
+            copied, _, missing = _sync(cfg, conn, cfg.library, table, paths, dry_run, log, label, check_files)
+            stats.clips_copied += copied
+            stats.missing += missing
+        return stats
+
     # Videos follow the same folder names in their own tree, so an event rename moves both.
     from . import videos as videos_mod
 
@@ -195,12 +224,15 @@ def curate(
     return stats
 
 
-def _clip_paths(conn: sqlite3.Connection) -> dict[str, str]:
+def _clip_paths(conn: sqlite3.Connection, photos: set[str] | None = None) -> dict[str, str]:
+    """Clip sha256 → path beside its photo (for every clip, or just those of `photos`)."""
     paths, used = {}, set()
+    only = f"AND p.sha256 IN ({','.join('?' * len(photos)) or 'NULL'})" if photos is not None else ""
     rows = conn.execute(
-        """SELECT c.sha256, c.ext, p.library_path FROM live_clips c
+        f"""SELECT c.sha256, c.ext, p.library_path FROM live_clips c
            JOIN sources s ON s.path = c.photo_path JOIN photos p ON p.sha256 = s.sha256
-           WHERE p.library_path IS NOT NULL ORDER BY c.sha256"""
+           WHERE p.library_path IS NOT NULL {only} ORDER BY c.sha256""",
+        sorted(photos or []),
     ).fetchall()
     for r in rows:
         base = r["library_path"].rsplit(".", 1)[0]
@@ -213,12 +245,15 @@ def _clip_paths(conn: sqlite3.Connection) -> dict[str, str]:
     return paths
 
 
-def _rich_paths(conn: sqlite3.Connection) -> dict[str, str]:
+def _rich_paths(conn: sqlite3.Connection, photos: set[str] | None = None) -> dict[str, str]:
+    """Package sha256 → path beside its photo (for every package, or just those of `photos`)."""
     from .rich import package_photo_sha
 
     paths = {}
     for r in conn.execute("SELECT sha256 FROM rich_packages ORDER BY sha256").fetchall():
         photo = package_photo_sha(conn, r["sha256"])
+        if photos is not None and photo not in photos:
+            continue
         row = photo and conn.execute("SELECT library_path FROM photos WHERE sha256 = ?", (photo,)).fetchone()
         if row and row["library_path"]:
             paths[r["sha256"]] = row["library_path"].rsplit(".", 1)[0] + ".nar"

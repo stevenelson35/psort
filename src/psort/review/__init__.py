@@ -11,7 +11,8 @@ from datetime import date as calendar_date
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, abort, flash, g, make_response, redirect, render_template, request, send_file, url_for
+from flask import (Flask, abort, flash, g, jsonify, make_response, redirect, render_template, render_template_string,
+                   request, send_file, url_for)
 from PIL import Image
 from werkzeug.exceptions import HTTPException
 
@@ -91,13 +92,23 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     atexit.register(flush_manifest)  # Ctrl+C on `psort review` still leaves an up-to-date manifest
     app.flush_manifest = flush_manifest
 
+    # One change at a time: Flask serves requests on threads, and two quick clicks (or a click while
+    # an earlier one is still moving files) must not interleave database updates and file moves.
+    change_lock = threading.Lock()
+
     @app.before_request
-    def defer_manifest():
-        actions.manifest_later = manifest_later
+    def one_change_at_a_time():
+        if request.method == "POST":
+            change_lock.acquire()
+            g.holds_change_lock = True
+            # Only while holding the lock: a GET finishing on another thread mustn't switch it back.
+            actions.manifest_later = manifest_later
 
     @app.teardown_request
-    def undefer_manifest(_exc):
-        actions.manifest_later = None
+    def release_change_lock(_exc):
+        if g.pop("holds_change_lock", False):
+            actions.manifest_later = None
+            change_lock.release()
 
     @app.teardown_appcontext
     def close_db(_exc):
@@ -141,12 +152,24 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
             target = default
         return redirect(target)
 
+    def wants_json() -> bool:
+        """The day page's script sends clicks with fetch() and updates the page in place."""
+        return request.headers.get("X-Requested-With") == "fetch"
+
+    def fail(message: str, default: str, status: int = 400):
+        if wants_json():
+            return jsonify(ok=False, error=message), status
+        flash(message, "error")
+        return back(default)
+
     def act(fn, *args, default="/"):
         try:
             fn(*args)
         except (actions.ActionError, events_mod.EventError, faces_mod.FaceError, FileExistsError,
                 backup_mod.BackupError) as e:
-            flash(str(e), "error")
+            return fail(str(e), default)
+        if wants_json():
+            return jsonify(ok=True)
         return back(default)
 
     @app.errorhandler(Exception)
@@ -158,8 +181,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         app.logger.exception("Unhandled error on %s %s", request.method, request.path)
         message = f"Something went wrong ({type(e).__name__}: {e}). Full details were printed to the terminal."
         if request.method == "POST":
-            flash(message, "error")
-            return back("/")
+            return fail(message, "/", 500)
         return render_template("error.html", message=message), 500
 
     # ---- Browsing ----
@@ -217,27 +239,8 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
             "prev_todo": next((k for k in reversed(todo) if k < key), None),
             "next_todo": next((k for k in todo if k > key), None),
         }
-        # Prefix match, not LIKE: folder names contain '_', which LIKE treats as a wildcard.
         prefix = key + "/"
-        photos = db().execute(
-            f"""SELECT {CARD_COLUMNS} FROM photos p
-                WHERE substr(p.library_path, 1, ?) = ? AND p.duplicate_of IS NULL
-                  AND (p.is_best = 1 OR p.private = 1
-                       OR EXISTS (SELECT 1 FROM favorites fav WHERE fav.sha256 = p.sha256))
-                ORDER BY p.taken_at, p.name""",
-            (len(prefix), prefix),
-        ).fetchall()
-        photo_people = defaultdict(list)
-        if photos:
-            shas = [p["sha256"] for p in photos]
-            marks = ",".join("?" * len(shas))
-            for row in db().execute(
-                f"SELECT f.sha256, pe.name FROM faces f JOIN people pe ON pe.id = f.person_id "
-                f"WHERE f.sha256 IN ({marks}) ORDER BY pe.name",
-                shas,
-            ):
-                if row["name"] not in photo_people[row["sha256"]]:
-                    photo_people[row["sha256"]].append(row["name"])
+        photos, photo_people = day_cards(db(), key)
         people = sorted({name for names in photo_people.values() for name in names})
         videos = db().execute(
             "SELECT * FROM videos WHERE substr(library_path, 1, ?) = ? ORDER BY taken_at, name",
@@ -246,6 +249,22 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         pinned = {r[0] for r in db().execute("SELECT moment_id FROM library_pins")}
         return render_template("folder.html", info=info, photos=photos, videos=videos,
                                people=people, photo_people=photo_people, nav=nav, pinned=pinned)
+
+    @app.get("/folder/<path:key>/cards")
+    def folder_cards(key):
+        """The day page's cards for some moments (?m=<moment id>, repeated), after a click changed
+        them, plus the day's new counts. A moment that's gone (combined away) has no cards."""
+        moment_ids = request.args.getlist("m")
+        photos, photo_people = day_cards(db(), key, moment_ids)
+        pinned = {r[0] for r in db().execute("SELECT moment_id FROM library_pins")}
+        html = render_template_string(
+            '{% from "_day_card.html" import day_card %}'
+            "{% for p in photos %}{{ day_card(p, photo_people, pinned, day_url) }}{% endfor %}",
+            photos=photos, photo_people=photo_people, pinned=pinned, day_url=url_for("folder", key=key))
+        prefix = key + "/"
+        counts = db().execute("SELECT COUNT(DISTINCT moment_id), COUNT(*) FROM photos WHERE substr(library_path, 1, ?) = ?",
+                              (len(prefix), prefix)).fetchone()
+        return jsonify(html=html, moments=counts[0], photos=counts[1])
 
     @app.post("/moment/<moment_id>/pin")
     def pin_moment(moment_id):
@@ -406,8 +425,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     def combine_moments(key):
         shas = request.form.getlist("photo")
         if not shas:
-            flash("Select best shots from at least two moments to combine them.", "error")
-            return back(url_for("folder", key=key))
+            return fail("Select best shots from at least two moments to combine them.", url_for("folder", key=key))
         marks = ",".join("?" * len(set(shas)))
         rows = db().execute(
             f"SELECT sha256, library_path, is_best FROM photos WHERE sha256 IN ({marks})", sorted(set(shas))
@@ -415,8 +433,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         prefix = key + "/"
         if len(rows) != len(set(shas)) or any(not r["is_best"] or not r["library_path"].startswith(prefix)
                                               for r in rows):
-            flash("Choose best-shot cards from this day only.", "error")
-            return back(url_for("folder", key=key))
+            return fail("Choose best-shot cards from this day only.", url_for("folder", key=key))
         return act(actions.combine_moments, cfg, db(), shas, default=url_for("folder", key=key))
 
     @app.post("/moment/<moment_id>/split")
@@ -711,6 +728,38 @@ CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.cl
     EXISTS (SELECT 1 FROM rich_packages r JOIN sources rs ON rs.path = r.photo_path
             WHERE rs.sha256 = p.sha256) AS rich,
     (SELECT COALESCE(d.label, d.member) FROM derived_frames d WHERE d.sha256 = p.sha256) AS rich_frame"""
+
+
+def day_cards(conn: sqlite3.Connection, key: str, moment_ids: list[str] | None = None) -> tuple[list, dict]:
+    """A day page's cards: each moment's best shot, plus favorite or private shots that aren't
+    (shown only with their filter); all of the day's, or just those of `moment_ids`. Also each
+    card's identified people."""
+    # Prefix match, not LIKE: folder names contain '_', which LIKE treats as a wildcard.
+    prefix = key + "/"
+    only, params = "", []
+    if moment_ids is not None:
+        only = f"AND p.moment_id IN ({','.join('?' * len(moment_ids)) or 'NULL'})"
+        params = list(moment_ids)
+    photos = conn.execute(
+        f"""SELECT {CARD_COLUMNS} FROM photos p
+            WHERE substr(p.library_path, 1, ?) = ? AND p.duplicate_of IS NULL
+              AND (p.is_best = 1 OR p.private = 1
+                   OR EXISTS (SELECT 1 FROM favorites fav WHERE fav.sha256 = p.sha256)) {only}
+            ORDER BY p.taken_at, p.name""",
+        (len(prefix), prefix, *params),
+    ).fetchall()
+    photo_people = defaultdict(list)
+    if photos:
+        shas = [p["sha256"] for p in photos]
+        marks = ",".join("?" * len(shas))
+        for row in conn.execute(
+            f"SELECT f.sha256, pe.name FROM faces f JOIN people pe ON pe.id = f.person_id "
+            f"WHERE f.sha256 IN ({marks}) ORDER BY pe.name",
+            shas,
+        ):
+            if row["name"] not in photo_people[row["sha256"]]:
+                photo_people[row["sha256"]].append(row["name"])
+    return photos, photo_people
 
 
 def folder_key(library_path: str) -> str:

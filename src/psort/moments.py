@@ -52,6 +52,33 @@ def cluster(cfg: Config, conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(DISTINCT moment_id) FROM photos").fetchone()[0]
 
 
+def regroup(cfg: Config, conn: sqlite3.Connection, assignments: dict[str, str]) -> set[str]:
+    """Apply manual moment changes (sha256 → moment_id, already saved in moment_overrides) to just
+    those photos, instead of re-clustering the whole library: the next full cluster() reapplies the
+    overrides and gets the same answer. Returns every moment touched (old and new)."""
+    if not assignments:
+        return set()
+    shas = list(assignments)
+    marks = ",".join("?" * len(shas))
+    touched = {r[0] for r in conn.execute(f"SELECT DISTINCT moment_id FROM photos WHERE sha256 IN ({marks})", shas)}
+    touched |= set(assignments.values())
+    conn.executemany("UPDATE photos SET moment_id = ? WHERE sha256 = ?", [(m, s) for s, m in assignments.items()])
+    gone_marks = ",".join("?" * len(touched))
+    conn.execute(f"""DELETE FROM library_pins WHERE moment_id IN ({gone_marks})
+                     AND moment_id NOT IN (SELECT DISTINCT moment_id FROM photos WHERE moment_id IN ({gone_marks}))""",
+                 [*touched, *touched])
+    conn.commit()
+    mark_duplicates(cfg, conn, touched)
+    return touched
+
+
+def _in_moments(moments: set[str] | None, column: str = "p.moment_id") -> tuple[str, list[str]]:
+    """An SQL condition (and its parameters) limiting a query to some moments; all when None."""
+    if moments is None:
+        return "1", []
+    return f"{column} IN ({','.join('?' * len(moments)) or 'NULL'})", sorted(moments)
+
+
 def _is_copy(cfg: Config, a, b, hashes) -> bool:
     """Visual duplicate: the same picture saved twice (re-download, re-compression, resized share),
     as opposed to two frames of a burst. Same camera is implied (moments are per camera)."""
@@ -70,13 +97,15 @@ def _is_copy(cfg: Config, a, b, hashes) -> bool:
     return min(a["sharpness"], b["sharpness"]) >= 0.9 * max(a["sharpness"], b["sharpness"])
 
 
-def mark_duplicates(cfg: Config, conn: sqlite3.Connection) -> int:
-    """Within each moment, set duplicate_of on every visual copy except the best-quality one
-    (most pixels, then sharpest, then largest file). Returns how many copies were set aside."""
+def mark_duplicates(cfg: Config, conn: sqlite3.Connection, moments: set[str] | None = None) -> int:
+    """Within each moment (or just `moments`), set duplicate_of on every visual copy except the
+    best-quality one (most pixels, then sharpest, then largest file). Returns how many copies were set aside."""
+    where, params = _in_moments(moments)
     rows = conn.execute(
         f"""SELECT p.sha256, p.moment_id, p.taken_at, p.phash, p.width, p.height, p.sharpness, p.exposure,
                   (SELECT MAX(s.size) FROM sources s WHERE s.sha256 = p.sha256) AS size
-           FROM photos p WHERE p.date_source NOT IN {sql_in(NO_TIME)} ORDER BY p.moment_id, p.taken_at"""
+           FROM photos p WHERE p.date_source NOT IN {sql_in(NO_TIME)} AND {where} ORDER BY p.moment_id, p.taken_at""",
+        params,
     ).fetchall()
     hashes = {r["sha256"]: imagehash.hex_to_hash(r["phash"]) for r in rows}
     duplicate_of: dict[str, str | None] = {r["sha256"]: None for r in rows}
@@ -107,7 +136,8 @@ def mark_duplicates(cfg: Config, conn: sqlite3.Connection) -> int:
                     if m is not keeper:
                         duplicate_of[m["sha256"]] = keeper["sha256"]
 
-    conn.execute(f"UPDATE photos SET duplicate_of = NULL WHERE date_source IN {sql_in(NO_TIME)}")
+    no_time, params = _in_moments(moments, "moment_id")
+    conn.execute(f"UPDATE photos SET duplicate_of = NULL WHERE date_source IN {sql_in(NO_TIME)} AND {no_time}", params)
     conn.executemany("UPDATE photos SET duplicate_of = ? WHERE sha256 = ?", [(v, k) for k, v in duplicate_of.items()])
     conn.commit()
     return sum(v is not None for v in duplicate_of.values())
@@ -121,14 +151,17 @@ def _joins(cfg: Config, row, current, hashes) -> bool:
     return min(h - hashes[m["sha256"]] for m in current) <= cfg.phash_threshold
 
 
-def score(cfg: Config, conn: sqlite3.Connection) -> None:
+def score(cfg: Config, conn: sqlite3.Connection, moments: set[str] | None = None) -> None:
     """Score each photo relative to its moment and mark the best (a user pick always wins; a
-    favorite is preferred next, over the automatic score-based pick)."""
+    favorite is preferred next, over the automatic score-based pick). `moments` limits this to
+    those moments: a review click only changes one or two, and the library has ~100,000 photos."""
     w = cfg.weights
+    where, params = _in_moments(moments)
     rows = conn.execute(
-        """SELECT p.*, EXISTS (SELECT 1 FROM favorites f WHERE f.sha256 = p.sha256) AS is_favorite
-           FROM photos p
-           ORDER BY p.moment_id, p.taken_at, p.sha256"""
+        f"""SELECT p.*, EXISTS (SELECT 1 FROM favorites f WHERE f.sha256 = p.sha256) AS is_favorite
+           FROM photos p WHERE {where}
+           ORDER BY p.moment_id, p.taken_at, p.sha256""",
+        params,
     ).fetchall()
     for _, group in groupby(rows, key=lambda r: r["moment_id"]):
         everyone = list(group)

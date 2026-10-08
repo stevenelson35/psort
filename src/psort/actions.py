@@ -8,7 +8,7 @@ from datetime import date, datetime, time
 from . import daystatus, highlights, trash
 from .config import Config
 from .library import assign_names, curate, day_of, write_manifest
-from .moments import cluster, score
+from .moments import cluster, regroup, score
 
 
 class ActionError(Exception):
@@ -27,15 +27,21 @@ def _manifest(cfg: Config, conn: sqlite3.Connection) -> None:
         write_manifest(cfg, conn)
 
 
-def refresh(cfg: Config, conn: sqlite3.Connection, recluster: bool = False) -> None:
+def refresh(cfg: Config, conn: sqlite3.Connection, recluster: bool = False, moments: set[str] | None = None) -> None:
     """Re-derive moments/best picks and move just the library files that need to move. Files that
     stay put aren't re-checked on disk (that's `psort run`'s job), so a click takes a moment,
-    not minutes."""
+    not minutes. `moments` limits the work to the moments a click changed: re-scoring and
+    re-curating all ~100,000 photos took ~3 s per click. `recluster` always does everything."""
     if recluster:
         cluster(cfg, conn)
-    score(cfg, conn)
-    curate(cfg, conn, log=lambda _: None, check_files=False)
-    highlights.sync(cfg, conn)  # highlight copies follow their originals
+        moments = None
+    score(cfg, conn, moments)
+    curate(cfg, conn, log=lambda _: None, check_files=False, moments=moments)
+    shas = None
+    if moments is not None:
+        marks = ",".join("?" * len(moments)) or "NULL"
+        shas = {r[0] for r in conn.execute(f"SELECT sha256 FROM photos WHERE moment_id IN ({marks})", sorted(moments))}
+    highlights.sync(cfg, conn, shas=shas)  # highlight copies follow their originals
     _manifest(cfg, conn)
 
 
@@ -67,14 +73,14 @@ def pick_best(cfg: Config, conn: sqlite3.Connection, sha: str) -> None:
     photo = _photo(conn, sha)
     conn.execute("UPDATE photos SET user_best = (sha256 = ?) WHERE moment_id = ?", (sha, photo["moment_id"]))
     conn.commit()
-    refresh(cfg, conn)
+    refresh(cfg, conn, moments={photo["moment_id"]})
 
 
 def clear_pick(cfg: Config, conn: sqlite3.Connection, moment_id: str) -> None:
     """Go back to the automatic best pick."""
     conn.execute("UPDATE photos SET user_best = 0 WHERE moment_id = ?", (moment_id,))
     conn.commit()
-    refresh(cfg, conn)
+    refresh(cfg, conn, moments={moment_id})
 
 
 def combine_moments(cfg: Config, conn: sqlite3.Connection, photo_shas: list[str]) -> int:
@@ -105,7 +111,8 @@ def combine_moments(cfg: Config, conn: sqlite3.Connection, photo_shas: list[str]
         conn.execute("INSERT OR IGNORE INTO library_pins (moment_id) VALUES (?)", (target,))
     conn.execute(f"UPDATE photos SET user_best = 0 WHERE moment_id IN ({moment_marks})", tuple(moment_ids))
     conn.commit()
-    refresh(cfg, conn, recluster=True)
+    # Just these photos change moment; re-clustering the whole library took ~4 s.
+    refresh(cfg, conn, moments=regroup(cfg, conn, {r["sha256"]: target for r in members}))
     _remark(conn, keep)
     return len(moment_ids)
 
@@ -140,7 +147,7 @@ def split_moment(cfg: Config, conn: sqlite3.Connection, moment_id: str, photo_sh
         [(sha, moment_id) for sha in remaining] + [(sha, split_id) for sha in shas],
     )
     conn.commit()
-    refresh(cfg, conn, recluster=True)
+    refresh(cfg, conn, moments=regroup(cfg, conn, {sha: split_id for sha in shas} | {sha: moment_id for sha in remaining}))
     _remark(conn, keep)
     return len(shas)
 
@@ -188,7 +195,7 @@ def set_tags(cfg: Config, conn: sqlite3.Connection, sha: str, text: str) -> list
     conn.execute("DELETE FROM tags WHERE sha256 = ?", (sha,))
     conn.executemany("INSERT INTO tags (sha256, tag) VALUES (?, ?)", [(sha, t) for t in tags])
     conn.commit()
-    highlights.sync(cfg, conn)  # tags show as Windows Tags on highlight copies
+    highlights.sync(cfg, conn, shas={sha})  # tags show as Windows Tags on highlight copies
     _manifest(cfg, conn)
     return tags
 
@@ -256,7 +263,7 @@ def toggle_favorite(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
         conn.execute("INSERT OR IGNORE INTO library_pins (moment_id) SELECT moment_id FROM photos WHERE sha256 = ?",
                      (sha,))
         conn.commit()
-    refresh(cfg, conn)
+    refresh(cfg, conn, moments={_photo(conn, sha)["moment_id"]})
     return now
 
 
@@ -271,7 +278,7 @@ def toggle_top_pick(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
         conn.execute("INSERT OR IGNORE INTO library_pins (moment_id) SELECT moment_id FROM photos WHERE sha256 = ?",
                      (sha,))
         conn.commit()
-    refresh(cfg, conn)
+    refresh(cfg, conn, moments={_photo(conn, sha)["moment_id"]})
     return now
 
 

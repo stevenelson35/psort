@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "_macros.html" import breadcrumb, card, image_zoom, post, video_card %}
+{% from "_macros.html" import breadcrumb, image_zoom, post, video_card %}
+{% from "_day_card.html" import day_card %}
 {% set when, event = pretty_folder(info.key) %}
 {% set library_url = url_for('index') ~ ('#undated' if info.key == '_undated' else '#m' ~ info.key.split('/')[1][:7]) %}
 {% macro nav_btn(key, label, what) -%}
@@ -39,7 +40,7 @@
   {% if info.status == 'new' %}<span class="status status-new">not reviewed yet</span>
   {% elif info.status in ('pics added', 'moments updated') %}<span class="status status-changed">{{ info.status }}</span>{% endif %}</h1>
 <p class="row muted">
-  {{ info.moments }} moments · {{ info.photos }} photos{% if info.videos %} · 🎬 {{ info.videos }} video{{ "" if info.videos == 1 else "s" }}{% endif %}
+  <span id="day-moment-count">{{ info.moments }}</span> moments · <span id="day-photo-count">{{ info.photos }}</span> photos{% if info.videos %} · 🎬 {{ info.videos }} video{{ "" if info.videos == 1 else "s" }}{% endif %}
 </p>
 {% if videos %}
   <h2>🎬 {{ videos|length }} video{{ "" if videos|length == 1 else "s" }} from this day</h2>
@@ -75,24 +76,9 @@
             onclick="this.form.dataset.action = 'combine'">Combine selected moments</button>
   </form>
   <div class="grid zoomable-grid day-photos" id="day-photos" data-photo-mode="fit">{% for p in photos %}
-    <div class="day-photo"{% if p.is_best %} id="m-{{ p.moment_id }}"{% endif %} data-people='{{ photo_people.get(p.sha256, [])|tojson }}'
-         data-close-call="{{ 'true' if p.close_call else 'false' }}" data-favorite="{{ 'true' if p.favorite else 'false' }}"
-         data-private="{{ 'true' if p.private else 'false' }}"
-         data-alternate="{{ 'false' if p.is_best else 'true' }}">
-      <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulkdel"> select</label>
-      {% if not p.is_best and p.favorite %}<div class="pill" title="Starred, but another shot is this moment's best; shown only with the Favorites{{ ' or Private' if p.private }} filter">★ favorite alternate (not this moment's best)</div>
-      {%- elif not p.is_best %}<div class="pill" title="Marked private, but another shot is this moment's best; shown only with the Private filter">🔒 private alternate (not this moment's best)</div>{% endif %}
-      {{ card(p) }}
-      {% if p.is_best %}
-      <form method="post" action="{{ url_for('pin_moment', moment_id=p.moment_id) }}" class="pin-form">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="next" value="{{ request.path }}#m-{{ p.moment_id }}">
-        <label class="tick"><input type="checkbox" name="pinned" value="1" onchange="this.form.submit()"
-          {% if p.moment_id in pinned %}checked{% endif %}> show on Library</label>
-      </form>
-      {% endif %}
-    </div>
+    {{ day_card(p, photo_people, pinned, request.path) }}
   {% endfor %}</div>
+  <div id="day-toast" class="flash error toast" role="alert" hidden></div>
   <p class="muted small" id="day-filter-empty" hidden>No photos match the selected filters.</p>
   <p class="muted small">Deleting a moment's best shot deletes just that shot; the next best takes its place.</p>
   <script>
@@ -110,11 +96,12 @@
 
       const allFilter = document.querySelector("[data-day-filter-all]");
       const filters = Array.from(document.querySelectorAll("[data-day-filter]"));
-      const cards = Array.from(grid.querySelectorAll(".day-photo"));
+      const allCards = () => Array.from(grid.querySelectorAll(".day-photo"));
       const count = document.getElementById("day-filter-count");
       const empty = document.getElementById("day-filter-empty");
       function renderFilters() {
         const active = filters.filter(button => button.getAttribute("aria-pressed") === "true");
+        const cards = allCards();
         let visible = 0;
         cards.forEach(card => {
           const names = JSON.parse(card.dataset.people || "[]");
@@ -158,6 +145,86 @@
         renderFilters();
       });
       renderFilters();
+
+      // Clicks without reloading the page: ☆ ◇ 🔒, "show on Library" and Combine are sent with
+      // fetch(), then just the changed moments' cards are swapped in, so the page keeps its place.
+      // (The forms still work as plain posts without JavaScript.)
+      const cardsUrl = {{ url_for('folder_cards', key=info.key)|tojson }};
+      const toast = document.getElementById("day-toast");
+      let toastTimer;
+      function showError(message) {
+        toast.textContent = message;
+        toast.hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { toast.hidden = true; }, 8000);
+      }
+      async function send(form, submitter) {
+        // A button's formAction is the page's own URL unless it sets formaction, so check the attribute.
+        const action = submitter && submitter.hasAttribute("formaction") ? submitter.formAction : form.action;
+        const response = await fetch(action, {
+          method: "POST", body: new FormData(form, submitter), headers: {"X-Requested-With": "fetch"},
+        });
+        let result;
+        try {
+          result = await response.json();
+        } catch {
+          result = {ok: false, error: response.status === 403
+            ? "This page is out of date (psort review was restarted since it loaded). Reload the page and try again."
+            : "Something went wrong (" + response.status + ")."};
+        }
+        if (!result.ok) throw new Error(result.error);
+      }
+      async function reloadMoments(momentIds) {
+        const query = new URLSearchParams(momentIds.map(id => ["m", id]));
+        const response = await fetch(cardsUrl + "?" + query);
+        if (!response.ok) throw new Error("Couldn't refresh the photos (" + response.status + "). Reload the page.");
+        const result = await response.json();
+        const old = allCards().filter(card => momentIds.includes(card.dataset.moment));
+        const fresh = document.createElement("template");
+        fresh.innerHTML = result.html;
+        grid.insertBefore(fresh.content, old[0] || null);  // where the first of them was (moments are in time order)
+        old.forEach(card => card.remove());
+        document.getElementById("day-moment-count").textContent = result.moments;
+        document.getElementById("day-photo-count").textContent = result.photos;
+        renderFilters();
+      }
+
+      grid.addEventListener("submit", async event => {
+        const form = event.target;
+        const card = form.closest(".day-photo");
+        if (!card) return;
+        event.preventDefault();
+        if (card.classList.contains("busy")) return;  // one change per card at a time
+        const button = event.submitter;
+        if (button && button.classList.contains("star")) button.classList.toggle("on");  // show it right away
+        card.classList.add("busy");
+        try {
+          await send(form, button);
+          await reloadMoments([card.dataset.moment]);
+        } catch (error) {
+          if (button && button.classList.contains("star")) button.classList.toggle("on");
+          const pin = form.querySelector("input[name=pinned]");
+          if (pin) pin.checked = !pin.checked;
+          card.classList.remove("busy");
+          showError(error.message);
+        }
+      });
+
+      const bulk = document.getElementById("bulkdel");
+      bulk.addEventListener("submit", async event => {
+        if (bulk.dataset.action !== "combine") return;  // Delete ticked reloads the page as before
+        event.preventDefault();
+        const ticked = allCards().filter(card => card.querySelector("input[name=photo]").checked);
+        const momentIds = [...new Set(ticked.map(card => card.dataset.moment))];
+        ticked.forEach(card => card.classList.add("busy"));
+        try {
+          await send(bulk, event.submitter);
+          await reloadMoments(momentIds);
+        } catch (error) {
+          ticked.forEach(card => card.classList.remove("busy"));
+          showError(error.message);
+        }
+      });
     })();
   </script>
 {% endif %}

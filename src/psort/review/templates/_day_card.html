@@ -1,0 +1,22 @@
+{% from "_macros.html" import card %}
+{# One card on a day page. Also rendered on its own (GET /folder/<key>/cards) to update the page in place. #}
+{% macro day_card(p, photo_people, pinned, day_url) -%}
+    <div class="day-photo" data-moment="{{ p.moment_id }}" data-sha="{{ p.sha256 }}"{% if p.is_best %} id="m-{{ p.moment_id }}"{% endif %}
+         data-people='{{ photo_people.get(p.sha256, [])|tojson }}'
+         data-close-call="{{ 'true' if p.close_call else 'false' }}" data-favorite="{{ 'true' if p.favorite else 'false' }}"
+         data-private="{{ 'true' if p.private else 'false' }}"
+         data-alternate="{{ 'false' if p.is_best else 'true' }}">
+      <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulkdel"> select</label>
+      {% if not p.is_best and p.favorite %}<div class="pill" title="Starred, but another shot is this moment's best; shown only with the Favorites{{ ' or Private' if p.private }} filter">★ favorite alternate (not this moment's best)</div>
+      {%- elif not p.is_best %}<div class="pill" title="Marked private, but another shot is this moment's best; shown only with the Private filter">🔒 private alternate (not this moment's best)</div>{% endif %}
+      {{ card(p, next=day_url ~ "#m-" ~ p.moment_id) }}
+      {% if p.is_best %}
+      <form method="post" action="{{ url_for('pin_moment', moment_id=p.moment_id) }}" class="pin-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="next" value="{{ day_url }}#m-{{ p.moment_id }}">
+        <label class="tick"><input type="checkbox" name="pinned" value="1" onchange="this.form.requestSubmit()"
+          {% if p.moment_id in pinned %}checked{% endif %}> show on Library</label>
+      </form>
+      {% endif %}
+    </div>
+{%- endmacro %}

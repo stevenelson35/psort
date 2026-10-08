@@ -171,3 +171,6 @@ button.danger { border-color: var(--error); color: var(--error); }
 button.danger:hover { background: var(--error-bg); }
 .sticky-bar { position: sticky; top: 3rem; background: var(--surface); padding: .5rem; border-radius: 8px;
   border: 1px solid var(--line); z-index: 1; }
+.day-photo.busy { opacity: .55; pointer-events: none; transition: opacity .15s; }
+.toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90vw;
+         box-shadow: 0 4px 16px rgba(0, 0, 0, .4); }

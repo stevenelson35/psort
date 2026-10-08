@@ -32,19 +32,20 @@
   </div>
 {%- endmacro %}
 
-{% macro card(p, link=true) -%}
+{% macro card(p, link=true, next=None) -%}
   <figure class="card{% if p.close_call %} close{% endif %}">
     {% if link %}<a href="{{ url_for('moment', moment_id=p.moment_id) }}">{% endif %}
       <img src="{{ url_for('thumb', sha=p.sha256, size=320) }}" loading="lazy" alt="{{ p.name }}">
     {% if link %}</a>{% endif %}
     <figcaption>
       {{ post(url_for('favorite', sha=p.sha256), "★" if p.favorite else "☆", "star on" if p.favorite else "star",
-              title="Remove from favorites (and top picks)" if p.favorite else "Add to favorites") }}
+              title="Remove from favorites (and top picks)" if p.favorite else "Add to favorites", next=next) }}
       {{ post(url_for('top_pick', sha=p.sha256), "◆" if p.top_pick else "◇", "star top on" if p.top_pick else "star top",
-              title="Remove from top picks (stays a favorite)" if p.top_pick else "Make a top pick (also a favorite)") }}
+              title="Remove from top picks (stays a favorite)" if p.top_pick else "Make a top pick (also a favorite)",
+              next=next) }}
       {{ post(url_for('private', sha=p.sha256), "🔒", "star private on" if p.private else "star private",
               title="Private: never published. Click to allow publishing again." if p.private
-                    else "Mark private: never publish to the blog, an export, or the browse page") }}
+                    else "Mark private: never publish to the blog, an export, or the browse page", next=next) }}
       <span class="name">{{ p.name }}</span>
       {% if p.width and p.height %}<span class="muted dims">{{ p.width }} × {{ p.height }}</span>{% endif %}
       {% if p.shots > 1 %}<span class="pill">{{ p.shots }} shots</span>{% endif %}
