@@ -27,7 +27,7 @@ from PIL import Image
 
 from .config import DEFAULT_CONFIG_PATH, Config
 from .events import slugify
-from .export import render
+from .export import private_names, render
 
 SIZES = [2048, 1920, 1600, 1366, 1024, 768, 640]  # same list as the blog's create_responsive_images.py
 QUALITY = 85
@@ -349,6 +349,9 @@ def publish(cfg: Config, conn: sqlite3.Connection, s: BlogSettings, dry_run: boo
     photos = tray_photos(conn)
     if not photos and not (draft.top_text or draft.bottom_text or draft.youtube_id):
         raise BlogError("The post tray is empty.")
+    if private := private_names(conn, [p["sha256"] for p in photos]):
+        raise BlogError(f"The post tray has private photo(s): {', '.join(private)}. "
+                        "Remove them from the tray, or un-mark 🔒 private first.")
     filename = post_filename(draft, photos)
     target = s.posts_dir / filename
     if draft.existing_post and not target.exists():

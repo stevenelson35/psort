@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS photos (
     name           TEXT UNIQUE,            -- library stem, assigned once: YYYYMMDD_HHMMSS[_n]
     library_path   TEXT,                   -- relative to library root
     faces_scanned  INTEGER NOT NULL DEFAULT 0,  -- face recognition has run on the library copy
+    private        INTEGER NOT NULL DEFAULT 0,  -- never published (blog, export, browse page)
     first_seen     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -221,6 +222,7 @@ _ADDED_COLUMNS = [
     ("photos", "close_call", "INTEGER NOT NULL DEFAULT 0"),
     ("photos", "faces_scanned", "INTEGER NOT NULL DEFAULT 0"),
     ("photos", "duplicate_of", "TEXT"),
+    ("photos", "private", "INTEGER NOT NULL DEFAULT 0"),  # kept off the blog and the browse page
     ("tray", "position", "INTEGER NOT NULL DEFAULT 0"),
     ("faces", "ignored", "INTEGER NOT NULL DEFAULT 0"),
     ("favorites", "top", "INTEGER NOT NULL DEFAULT 0"),  # a top pick is always a favorite too

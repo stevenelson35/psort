@@ -51,6 +51,7 @@ In the review UI you can:
 - name events and faces, and fix dates, one photo at a time or many at once
 - identify, correct, or ignore a detected face right from its photo, not just from the Faces pages
 - star favorites (preferred automatically as a moment's best shot over the plain top score), mark ◆ top picks (always favorites too; copied flat to `top_picks/`), and delete junk (it goes to a trash you can restore from)
+- mark a photo 🔒 private so it's never published (blog, export, browse page); review them all from the Library's 🔒 Private view or a day page's 🔒 Private filter
 - filter day pages by person, close call, or no identified people, and zoom photo panels larger or smaller
 - see every ★ favorite or ◆ top pick by year, each linking back to its moment, from the Library page's Favorites / Top picks views
 - browse the Library by years and months (collapsible, with photo collages), as a list, or as a calendar heatmap; jump by year, or show only days still needing review
@@ -74,7 +75,7 @@ uv run psort faces list | crops | label <name> --group <id> | unlabel --face <id
 uv run psort backup [--out DIR] [--include-caches]    # archive config + state (DB, face models) to a dated .tar.gz; caches skipped unless asked
 uv run psort restore <archive> --relocate  # restore a backup on a new computer, fixing paths as you go
 uv run psort relocate                      # review/edit the paths in psort.toml
-uv run psort publish-browse [--dry-run]    # publish favorites + manifest for the browse page, with a CORS rule for the blog origin
+uv run psort publish-browse [--dry-run]    # publish favorites (not 🔒 private) + manifest for the browse page; removes un-starred/private ones from the server
 ```
 
 Photos can be JPEG, HEIC/HEIF, PNG, TIFF, GIF or WebP. Anything psort can't read as an image (including damaged photos) is kept in `unsorted_files/`; `psort recover` (also offered at the end of `psort run`) re-saves what can be read of a damaged image as a new library photo and leaves the original alone.

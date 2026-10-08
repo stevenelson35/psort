@@ -275,6 +275,16 @@ def toggle_top_pick(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
     return now
 
 
+def toggle_private(cfg: Config, conn: sqlite3.Connection, sha: str) -> bool:
+    """Mark / unmark a photo private: it stays in the library, highlights/ and top_picks/, but is
+    never published (blog post, export, or the browse page). Returns True if it's now private."""
+    now = not _photo(conn, sha)["private"]
+    conn.execute("UPDATE photos SET private = ? WHERE sha256 = ?", (int(now), sha))
+    conn.commit()
+    _manifest(cfg, conn)  # the library manifest records the flag
+    return now
+
+
 def delete_photos(cfg: Config, conn: sqlite3.Connection, shas: list[str]) -> int:
     """Move photos to library/_trash (restorable); they're never copied back from the inbox."""
     marks = ",".join("?" * len(shas)) or "''"

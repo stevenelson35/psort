@@ -73,6 +73,10 @@
       {{ post(url_for('top_pick', sha=s.sha256), "◆ Top pick" if s.top_pick else "◇ Make a top pick",
               "star top on" if s.top_pick else "star top",
               title="Remove from top picks (stays a favorite)" if s.top_pick else "Top pick: also a favorite, and copied flat to top_picks/") }}
+      {{ post(url_for('private', sha=s.sha256), "🔒 Private" if s.private else "🔒 Mark private",
+              "star private on" if s.private else "star private",
+              title="Never published. Click to allow publishing again." if s.private
+                    else "Never publish this photo to the blog, an export, or the browse page") }}
       {% if s.is_best %}<span class="pill ok">★ best</span>{% endif %}
       {% if s.duplicate_of %}<span class="pill">duplicate of {{ s.copy_of }}</span>
         <span class="muted">Same picture saved again. psort kept the better copy; this one is in _duplicates.</span>

@@ -477,6 +477,10 @@ def publish_browse_cmd(
     except blog_mod.BlogError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from e
+    if remote_dir.strip("/") == s.remote_dir.strip("/"):
+        # Publishing removes photos that are no longer favorites; the blog's photos must never be touched.
+        typer.secho(f"--remote-dir can't be the blog's photo folder ({s.remote_dir}).", fg="red", err=True)
+        raise typer.Exit(1)
     s = dataclasses.replace(s, remote_dir=remote_dir)
     password = None if dry_run else blog_mod.load_password()
     try:

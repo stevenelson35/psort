@@ -6,6 +6,12 @@
 {% if not photos %}
   <p>Empty. Use "Add to post tray" on any photo, then write the post here.</p>
 {% else %}
+  {% set private = photos|selectattr("private")|list %}
+  {% if private %}
+    <p class="flash error">🔒 {{ private|length }} of these {{ "is" if private|length == 1 else "are" }} marked private
+      ({{ private|map(attribute="name")|join(", ") }}). Publishing and Export only will refuse until you remove
+      {{ "it" if private|length == 1 else "them" }} or un-mark 🔒 private.</p>
+  {% endif %}
   {% set with_people = photos|selectattr("people")|list %}
   {% if with_people %}
     <p class="flash warn">{{ with_people|length }} of these show people ({{ with_people|map(attribute="people")|join("; ") }}).

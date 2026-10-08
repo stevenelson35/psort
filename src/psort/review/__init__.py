@@ -36,7 +36,8 @@ MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 
 BACKUP_DIR = Path.home() / "psort-backups"  # where `psort backup` / the Backup page save archives
 MAX_DAY_THUMBS = 12  # pinned moment thumbnails shown per day on the Library page; the rest are counted
 MONTH_COVER = 6  # photos in a month's cover collage on the Library page
-LIBRARY_VIEWS = ("grouped", "list", "calendar", "favorites", "top")
+LIBRARY_VIEWS = ("grouped", "list", "calendar", "favorites", "top", "private")
+GALLERY_VIEWS = ("favorites", "top", "private")  # Library views that show just those photos
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -188,12 +189,14 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         ):
             thumbs[folder_key(r["library_path"])].append(r)
         overview = library_overview(db(), all_folders, with_calendar=view == "calendar")
-        counts = db().execute("SELECT COUNT(*) AS favorites, COALESCE(SUM(top), 0) AS top FROM favorites f "
-                              "JOIN photos p ON p.sha256 = f.sha256 WHERE p.library_path IS NOT NULL").fetchone()
-        gallery = picks_gallery(db(), top_only=view == "top") if view in ("favorites", "top") else None
+        picks = dict(db().execute("SELECT COUNT(*) AS favorites, COALESCE(SUM(top), 0) AS top FROM favorites f "
+                                   "JOIN photos p ON p.sha256 = f.sha256 WHERE p.library_path IS NOT NULL").fetchone())
+        picks["private"] = db().execute(
+            "SELECT COUNT(*) FROM photos WHERE private = 1 AND library_path IS NOT NULL").fetchone()[0]
+        gallery = picks_gallery(db(), view) if view in GALLERY_VIEWS else None
         resp = make_response(render_template(
             "index.html", overview=overview, stats=stats, progress=progress, thumbs=thumbs, gallery=gallery,
-            counts=counts, max_thumbs=MAX_DAY_THUMBS, view=view,
+            picks=picks, max_thumbs=MAX_DAY_THUMBS, view=view,
             todo_count=progress["folders"] - progress["folders_done"]))
         if request.args.get("view") in LIBRARY_VIEWS:
             resp.set_cookie("psort-library-view", view, max_age=365 * 86400, samesite="Lax")
@@ -219,7 +222,8 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         photos = db().execute(
             f"""SELECT {CARD_COLUMNS} FROM photos p
                 WHERE substr(p.library_path, 1, ?) = ? AND p.duplicate_of IS NULL
-                  AND (p.is_best = 1 OR EXISTS (SELECT 1 FROM favorites fav WHERE fav.sha256 = p.sha256))
+                  AND (p.is_best = 1 OR p.private = 1
+                       OR EXISTS (SELECT 1 FROM favorites fav WHERE fav.sha256 = p.sha256))
                 ORDER BY p.taken_at, p.name""",
             (len(prefix), prefix),
         ).fetchall()
@@ -476,6 +480,10 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     def top_pick(sha):
         return act(actions.toggle_top_pick, cfg, db(), sha)
 
+    @app.post("/photo/<sha>/private")
+    def private(sha):
+        return act(actions.toggle_private, cfg, db(), sha)
+
     @app.get("/favorites")
     def favorites():
         year = request.args.get("year", "")
@@ -686,7 +694,7 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
 
 
 # Columns every photo card needs; `p` is photos.
-CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.close_call, p.width, p.height,
+CARD_COLUMNS = """p.sha256, p.name, p.library_path, p.moment_id, p.is_best, p.close_call, p.width, p.height, p.private,
     (SELECT COUNT(*) FROM photos m WHERE m.moment_id = p.moment_id AND m.duplicate_of IS NULL) AS shots,
     (SELECT COUNT(*) FROM photos m WHERE m.moment_id = p.moment_id AND m.duplicate_of IS NOT NULL) AS copies,
     p.duplicate_of,
@@ -721,17 +729,23 @@ def pretty_folder(key: str) -> tuple[str, str]:
     return datetime.strptime(day, "%Y-%m-%d").strftime("%a %-d %b %Y"), slug.replace("-", " ")
 
 
-def picks_gallery(conn: sqlite3.Connection, top_only: bool) -> dict:
-    """Every favorite (or only top picks), by year then month, each linking to its moment. Only
-    photos you picked: no best-shot stand-ins for days that have none."""
+def picks_gallery(conn: sqlite3.Connection, which: str) -> dict:
+    """Every favorite, top pick, or private photo (`which`), by year then month, each linking to
+    its moment. Only those photos: no best-shot stand-ins for days that have none."""
+    query = {
+        "favorites": "SELECT p.sha256, p.name, p.moment_id, p.library_path, p.taken_at, fav.top, p.private "
+                     "FROM favorites fav JOIN photos p ON p.sha256 = fav.sha256 WHERE p.library_path IS NOT NULL",
+        "top": "SELECT p.sha256, p.name, p.moment_id, p.library_path, p.taken_at, fav.top, p.private "
+               "FROM favorites fav JOIN photos p ON p.sha256 = fav.sha256 WHERE p.library_path IS NOT NULL "
+               "AND fav.top = 1",
+        "private": "SELECT p.sha256, p.name, p.moment_id, p.library_path, p.taken_at, "
+                   "COALESCE((SELECT top FROM favorites fav WHERE fav.sha256 = p.sha256), 0) AS top, p.private "
+                   "FROM photos p WHERE p.library_path IS NOT NULL AND p.private = 1",
+    }[which]
     years: dict[str, dict[str, list[dict]]] = {}
     undated: list[dict] = []
     count = 0
-    for r in conn.execute(
-        f"""SELECT p.sha256, p.name, p.moment_id, p.library_path, p.taken_at, fav.top FROM favorites fav
-            JOIN photos p ON p.sha256 = fav.sha256 WHERE p.library_path IS NOT NULL
-            {"AND fav.top = 1" if top_only else ""} ORDER BY p.taken_at, p.name"""
-    ):
+    for r in conn.execute(query + " ORDER BY p.taken_at, p.name"):
         count += 1
         parts = r["library_path"].split("/")
         when = datetime.fromisoformat(r["taken_at"])

@@ -249,3 +249,23 @@ def test_reorder_tray(setup, tmp_path):
     order = [r[0] for r in conn(tmp_path).execute(
         "SELECT p.name FROM tray t JOIN photos p ON p.sha256 = t.sha256 ORDER BY t.position")]
     assert order == ["20260705_090000", "20260703_145640"]
+
+
+def test_publish_refuses_private_photos_before_uploading(setup, tmp_path):
+    root, repo, remote = setup
+    add_to_tray(tmp_path, "20260703_145640")
+    c = conn(tmp_path)
+    c.execute("UPDATE photos SET private = 1 WHERE name = '20260703_145640'")
+    c.commit()
+    client, token = ui(tmp_path)
+    assert "marked private" in client.get("/tray").get_data(as_text=True)  # warned before trying
+    client.post("/tray/compose", data={"csrf": token, "title": "Secret", "action": "publish"})
+    page = client.get("/tray").get_data(as_text=True)
+    assert "The post tray has private photo(s): 20260703_145640" in page
+    assert not (root / "pics/blog/20260703_145640.jpg").exists()
+    assert not (repo / "all_collections/_posts/2026-07-03-secret.md").exists()
+
+
+def test_publish_browse_refuses_the_blogs_own_photo_folder(setup, psort):
+    out = psort("publish-browse", "--remote-dir", "pics/blog/", "--dry-run", expect=1).output
+    assert "can't be the blog's photo folder" in out

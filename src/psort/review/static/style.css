@@ -150,6 +150,9 @@ details.live video { width: 100%; max-height: 360px; background: var(--photo-bg)
 button.star { background: none; border: none; font-size: 1.15rem; line-height: 1; padding: 0 .25rem; color: var(--muted); }
 button.star.on { color: var(--warn); }
 button.star.top.on { color: var(--accent); }
+button.star.private { filter: grayscale(1); opacity: .35; font-size: .95rem; }
+button.star.private.on { filter: none; opacity: 1; }
+.pill.private { background: var(--warn-bg); color: var(--warn); }
 .shot .meta button.star { font-size: .95rem; border: 1px solid var(--line); padding: .25rem .6rem; }
 .composer .fields { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin: .6rem 0; }
 .composer label { display: flex; flex-direction: column; gap: .2rem; font-size: .88rem; color: var(--muted); }

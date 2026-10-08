@@ -76,6 +76,15 @@ def render(src: Path, dest: Path, description: str | None = None, keywords: list
     os.replace(partial, dest)
 
 
+def private_names(conn: sqlite3.Connection, shas: list[str]) -> list[str]:
+    """Names of the photos among these that are marked private (never published)."""
+    if not shas:
+        return []
+    marks = ",".join("?" * len(shas))
+    return [r[0] for r in conn.execute(
+        f"SELECT name FROM photos WHERE private = 1 AND sha256 IN ({marks}) ORDER BY name", list(shas))]
+
+
 def export(cfg: Config, conn: sqlite3.Connection, post: str, names: list[str] | None = None,
            keep_tray: bool = False) -> ExportResult:
     """Export the post tray (or the named library photos) to <outbox>/<post-slug>/.
@@ -94,6 +103,9 @@ def export(cfg: Config, conn: sqlite3.Connection, post: str, names: list[str] | 
         if not rows:
             raise ExportError("The post tray is empty. Add photos to it in the review UI first.")
 
+    if private := private_names(conn, [r["sha256"] for r in rows]):
+        raise ExportError(f"Not exporting private photo(s): {', '.join(private)}. "
+                          "Remove them from the post, or un-mark 🔒 private first.")
     folder = cfg.outbox / slug
     files = []
     for r in rows:

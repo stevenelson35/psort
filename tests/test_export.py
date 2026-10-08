@@ -108,3 +108,13 @@ def test_windows_paths():
 
     assert windows_path(Path("/mnt/c/Users/steve/Pictures/psort-outbox")) == r"C:\Users\steve\Pictures\psort-outbox"
     assert windows_path(Path("/mnt/d")) == "D:\\"
+
+
+def test_export_refuses_private_photos(psort, tmp_path):
+    psort("run")
+    conn = db(tmp_path)
+    conn.execute("UPDATE photos SET private = 1 WHERE name = '20260703_145640'")
+    conn.commit()
+    assert "Not exporting private photo(s): 20260703_145640" in psort("export", "post", "20260703_145640", expect=1).output
+    add_to_tray(tmp_path, "20260703_145640")
+    assert "Not exporting private photo(s)" in psort("export", "post", expect=1).output

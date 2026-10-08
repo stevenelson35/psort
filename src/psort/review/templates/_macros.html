@@ -42,11 +42,15 @@
               title="Remove from favorites (and top picks)" if p.favorite else "Add to favorites") }}
       {{ post(url_for('top_pick', sha=p.sha256), "◆" if p.top_pick else "◇", "star top on" if p.top_pick else "star top",
               title="Remove from top picks (stays a favorite)" if p.top_pick else "Make a top pick (also a favorite)") }}
+      {{ post(url_for('private', sha=p.sha256), "🔒", "star private on" if p.private else "star private",
+              title="Private: never published. Click to allow publishing again." if p.private
+                    else "Mark private: never publish to the blog, an export, or the browse page") }}
       <span class="name">{{ p.name }}</span>
       {% if p.width and p.height %}<span class="muted dims">{{ p.width }} × {{ p.height }}</span>{% endif %}
       {% if p.shots > 1 %}<span class="pill">{{ p.shots }} shots</span>{% endif %}
       {% if p.copies %}<span class="pill" title="Same picture saved more than once; extra copies are in _duplicates">+{{ p.copies }} duplicate{{ "" if p.copies == 1 else "s" }}</span>{% endif %}
       {% if p.close_call %}<span class="pill warn">close call</span>{% endif %}
+      {% if p.private %}<span class="pill private" title="Never published to the blog, an export, or the browse page">🔒 private</span>{% endif %}
       {% if p.rich %}<span class="pill" title="Nokia Rich Capture: its frames are in this moment, and the .nar package is kept beside it">◈ Rich</span>{% endif %}
       {% if p.rich_frame %}<span class="pill" title="A frame from a Nokia Rich Capture package">◈ {{ p.rich_frame }} frame</span>{% endif %}
       {% if p.live_clip %}<span class="pill" title="iPhone Live Photo: the short clip is kept beside the photo">◉ Live</span>{% endif %}

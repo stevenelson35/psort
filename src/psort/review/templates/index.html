@@ -15,7 +15,8 @@
 <div class="toolbar">
   <span class="btn-group" role="group" aria-label="Library view">
     {% for v, label in [("grouped", "Years & months"), ("list", "List"), ("calendar", "Calendar"),
-                        ("favorites", "★ Favorites (" ~ counts.favorites ~ ")"), ("top", "◆ Top picks (" ~ counts.top ~ ")")] %}
+                        ("favorites", "★ Favorites (" ~ picks.favorites ~ ")"), ("top", "◆ Top picks (" ~ picks.top ~ ")"),
+                        ("private", "🔒 Private (" ~ picks.private ~ ")")] %}
       <a class="btn{% if view == v %} active{% endif %}" href="{{ url_for('index', view=v) }}"
          {% if view == v %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
@@ -109,12 +110,17 @@
   {% endif %}
 
 {% elif gallery %}
-  <p class="muted small">Only the photos you picked, by year. Click one to open its moment.
-    {% if view == "favorites" %}◆ marks a top pick.{% endif %}</p>
-  {% if not gallery.count %}<p>{% if view == "top" %}No top picks yet. Click ◇ on any photo (it also becomes a favorite).{% else %}No favorites yet. Click ☆ on any photo.{% endif %}</p>{% endif %}
+  <p class="muted small">{% if view == "private" %}Photos marked 🔒 private: kept in the library, highlights/ and top_picks/,
+    but never published to the blog, an export, or the browse page.{% else %}Only the photos you picked, by year.{% endif %}
+    Click one to open its moment.
+    {% if view in ("favorites", "private") %}◆ marks a top pick.{% endif %}{% if view != "private" %} 🔒 marks a private photo.{% endif %}</p>
+  {% if not gallery.count %}<p>{% if view == "top" %}No top picks yet. Click ◇ on any photo (it also becomes a favorite).
+    {%- elif view == "private" %}No private photos. Click 🔒 on any photo to keep it off the blog and the browse page.
+    {%- else %}No favorites yet. Click ☆ on any photo.{% endif %}</p>{% endif %}
   {% macro pick(t) -%}
     <a href="{{ url_for('moment', moment_id=t.moment_id) }}" title="{{ t.name }}: open its moment"><img
-      src="{{ url_for('thumb', sha=t.sha256, size=320) }}" loading="lazy" alt="{{ t.name }}"><span{% if t.top %} class="top"{% endif %}>{% if view == "favorites" and t.top %}◆ {% endif %}{{ t.label }}</span></a>
+      src="{{ url_for('thumb', sha=t.sha256, size=320) }}" loading="lazy" alt="{{ t.name }}"><span{% if t.top %} class="top"{% endif %}>{% if view in ("favorites", "private") and t.top %}◆ {% endif %}
+      {%- if t.private and view != "private" %}🔒 {% endif %}{{ t.label }}</span></a>
   {%- endmacro %}
   {% for y in gallery.years %}
   <section id="y{{ y.year }}">

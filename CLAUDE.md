@@ -7,7 +7,7 @@ Local photo curation for one user (Steve). Read `DESIGN.md`, especially **§12 S
 unset VIRTUAL_ENV                  # the user's shell points it at another repo's venv
 export PATH="$HOME/.local/bin:$PATH"
 uv sync                            # install
-uv run pytest -q                   # 99 tests, ~80 s; must stay green
+uv run pytest -q                   # ~196 tests, ~2 min; must stay green
 uv run psort --help
 uv run psort run                   # uses ~/.config/psort/psort.toml (the user's REAL library)
 ```
