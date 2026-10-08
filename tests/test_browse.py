@@ -73,7 +73,7 @@ def test_manifest_has_people_and_events_but_no_embeddings(psort, tmp_path):
                      ]["people"] == ["Steve"]
 
 
-def test_publish_uploads_images_and_always_replaces_the_manifest(psort, tmp_path, ftp_site):
+def test_publish_uploads_images_and_replaces_the_manifest(psort, tmp_path, ftp_site):
     psort("run")
     favorite(tmp_path, "20260703_145634")
     root, port = ftp_site
@@ -89,8 +89,11 @@ def test_publish_uploads_images_and_always_replaces_the_manifest(psort, tmp_path
     assert manifest_path.exists()
     cors = (root / "pics/browse/.htaccess").read_text()
     assert 'Access-Control-Allow-Origin "https://blog.itsallonesong.com"' in cors
-    assert (root / "pics/browse/20260703_145634.jpg").exists()
+    assert not (root / "pics/browse/20260703_145634.jpg").exists()  # the page only uses the sizes
     assert (root / "pics/browse/640/20260703_145634-640.jpg").exists()
+    assert (root / "pics/browse/2048/20260703_145634-2048.jpg").exists()
+    assert (root / "pics/browse/index.html").exists()  # no folder listing
+    assert not list(root.glob("pics/browse/*.uploading"))
 
     favorite(tmp_path, "20260705_090000")  # a second favorite changes the manifest
     run_publish()
@@ -120,7 +123,7 @@ def test_private_favorites_stay_off_the_browse_page_and_leave_the_server(psort, 
     assert not list(root.glob("pics/browse/**/20260705_090000*"))
     assert (root / "pics/browse/640/20260703_145634-640.jpg").exists()
     assert (root / "pics/browse/notes.txt").exists()  # only psort's photo files are removed
-    assert "Removed 1 photo(s) no longer published" in log[-1]
+    assert "removed 1," in log[-1]
     manifest = json.loads((root / "pics/browse/browse-manifest.json").read_text())
     assert {p["id"] for p in manifest["photos"]} == {"20260703_145634"}
 
@@ -141,3 +144,107 @@ def test_only_private_favorites_means_nothing_to_publish(psort, tmp_path):
     with pytest.raises(browse.BrowseError, match="private photos are left out"):
         browse.publish(load(tmp_path / "psort.toml"), c, blog.BlogSettings(repo=tmp_path, ftp_host="h", ftp_user="u"),
                        None, dry_run=True)
+
+
+def settings_for(tmp_path, port):
+    return blog.BlogSettings(repo=tmp_path, ftp_host="127.0.0.1", ftp_user="sjnelson@itsallonesong.com",
+                             remote_dir="pics/browse", ftp_tls=False, ftp_port=port)
+
+
+def publish(tmp_path, port, **kw):
+    log = []
+    browse.publish(load(tmp_path / "psort.toml"), conn(tmp_path), settings_for(tmp_path, port), "secret",
+                   log=log.append, **kw)
+    return log
+
+
+def test_second_publish_with_nothing_new_does_not_even_connect(psort, tmp_path, ftp_site, monkeypatch):
+    psort("run")
+    favorite(tmp_path, "20260703_145634")
+    root, port = ftp_site
+    publish(tmp_path, port)
+
+    def no_connection(*_a, **_k):
+        raise AssertionError("connected to the server with nothing to do")
+
+    monkeypatch.setattr(browse, "Uploader", no_connection)
+    assert "Already up to date (1 photo(s))" in publish(tmp_path, port)[-1]
+
+
+def test_only_new_photos_are_rendered_and_uploaded(psort, tmp_path, ftp_site, monkeypatch):
+    psort("run")
+    favorite(tmp_path, "20260703_145634")
+    root, port = ftp_site
+    publish(tmp_path, port)
+    first = root / "pics/browse/640/20260703_145634-640.jpg"
+    first.write_bytes(b"marker: not re-uploaded")
+
+    rendered = []
+    real = browse.stage_images
+    monkeypatch.setattr(browse, "stage_images", lambda cfg, rows, out, **kw: rendered.extend(r["name"] for r in rows)
+                        or real(cfg, rows, out, **kw))
+    favorite(tmp_path, "20260705_090000")
+    log = publish(tmp_path, port)
+    assert rendered == ["20260705_090000"]
+    assert "Uploaded 1 new photo(s)" in log[-1] and "1 unchanged" in log[-1] and "browse-manifest.json" in log[-1]
+    assert first.read_bytes() == b"marker: not re-uploaded"
+    manifest = json.loads((root / "pics/browse/browse-manifest.json").read_text())
+    assert {p["id"] for p in manifest["photos"]} == {"20260703_145634", "20260705_090000"}
+
+
+def test_first_incremental_publish_adopts_what_is_already_there(psort, tmp_path, ftp_site, monkeypatch):
+    """A server published by the old psort (every size plus an unused full-size copy, no records)."""
+    psort("run")
+    favorite(tmp_path, "20260703_145634")
+    root, port = ftp_site
+    publish(tmp_path, port)
+    c = conn(tmp_path)
+    c.execute("DELETE FROM browse_published")
+    c.execute("DELETE FROM browse_files")
+    c.commit()
+    (root / "pics/browse/20260703_145634.jpg").write_bytes(b"old full-size copy")
+    (root / "pics/browse/640/20260101_000000-640.jpg").write_bytes(b"a stray old favorite")
+
+    rendered = []
+    monkeypatch.setattr(browse, "stage_images", lambda cfg, rows, out, **kw: rendered.extend(rows) or [])
+    log = publish(tmp_path, port)
+    assert rendered == []  # adopted, not re-uploaded
+    assert any("1 adopted without re-uploading" in line and "1 unused full-size" in line for line in log)
+    assert not (root / "pics/browse/20260703_145634.jpg").exists()
+    assert not (root / "pics/browse/640/20260101_000000-640.jpg").exists()
+    assert conn(tmp_path).execute("SELECT COUNT(*) FROM browse_published").fetchone()[0] == 1
+
+
+def test_verify_reuploads_a_photo_missing_on_the_server(psort, tmp_path, ftp_site):
+    psort("run")
+    favorite(tmp_path, "20260703_145634")
+    root, port = ftp_site
+    publish(tmp_path, port)
+    (root / "pics/browse/1024/20260703_145634-1024.jpg").unlink()
+    assert "Already up to date" in publish(tmp_path, port)[-1]  # the records can't know
+    log = publish(tmp_path, port, verify=True)
+    assert "Uploaded 1 new photo(s)" in log[-1]
+    assert (root / "pics/browse/1024/20260703_145634-1024.jpg").exists()
+
+
+def test_a_new_render_version_reuploads_everything(psort, tmp_path, ftp_site, monkeypatch):
+    psort("run")
+    favorite(tmp_path, "20260703_145634")
+    root, port = ftp_site
+    publish(tmp_path, port)
+    monkeypatch.setattr(browse, "RENDER_VERSION", browse.RENDER_VERSION + 1)
+    assert "Uploaded 1 new photo(s)" in publish(tmp_path, port)[-1]
+
+
+def test_dry_run_reports_the_plan_without_connecting(psort, tmp_path, ftp_site):
+    psort("run")
+    favorite(tmp_path, "20260703_145634")
+    root, port = ftp_site
+    publish(tmp_path, port)
+    favorite(tmp_path, "20260705_090000")
+    log = []
+    staged = browse.publish(load(tmp_path / "psort.toml"), conn(tmp_path), settings_for(tmp_path, port), None,
+                            dry_run=True, log=log.append)
+    assert "1 photo(s) to upload, 0 to remove, 1 unchanged" in log[-1]
+    assert (staged / "640/20260705_090000-640.jpg").exists() and not (staged / "640/20260703_145634-640.jpg").exists()
+    assert not (root / "pics/browse/640/20260705_090000-640.jpg").exists()

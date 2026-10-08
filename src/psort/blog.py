@@ -177,13 +177,15 @@ class Uploader:
 
 # ---- Images ----
 
-def stage_images(cfg: Config, photos: list[sqlite3.Row], out: Path) -> list[tuple[Path, str]]:
-    """Web copy + responsive sizes for each photo. Returns (local file, remote path) pairs."""
+def stage_images(cfg: Config, photos: list[sqlite3.Row], out: Path, include_base: bool = True) -> list[tuple[Path, str]]:
+    """Web copy + responsive sizes for each photo. Returns (local file, remote path) pairs; without
+    `include_base`, just the sizes (the web copy is still rendered locally, to resize from)."""
     files = []
     for p in photos:
         base = out / f"{p['name']}.jpg"
         render(cfg.library / p["library_path"], base)  # upright, ≤2048px, no GPS
-        files.append((base, base.name))
+        if include_base:
+            files.append((base, base.name))
         with Image.open(base) as im:
             width = im.width
             for size in SIZES:

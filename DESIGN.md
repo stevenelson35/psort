@@ -306,6 +306,19 @@ The **Post tray** page is a composer:
 4. **Git:** `git pull --ff-only`, then commit **only that post file**, then push. The blog's deploy workflow rebuilds GitHub Pages in about 2 minutes.
 5. **Link:** the page shows the URL, `https://blog.itsallonesong.com/<categories>/YYYY/MM/DD/<slug>.html`. The tray and draft are then cleared.
 
+### 8.1 The browse page (`psort publish-browse`)
+
+The blog's `browse.html` + `assets/js/browse.js` show the favorites, filterable by person, event and top pick. They read `pics/browse/browse-manifest.json` (names, dates, people's names, events, `top`) and load `pics/browse/<size>/<name>-<size>.jpg` through a `srcset` of the blog's 7 sizes. There are no full-size `<name>.jpg` copies: the page never used them.
+- **What a run does:** `browse_published` (one row per photo and remote folder: name, sha256, `RENDER_VERSION`) records what's on the server, and `browse_files` records digests of the manifest, `.htaccess` (the CORS rule for the blog's origin) and an empty `index.html` (blocks folder listing; `Options -Indexes` would break the folder if the host disallows it). A run compares favorites (not private) with those records, then:
+  1. renders and uploads only new photos (all 7 sizes, then the record);
+  2. replaces any changed small file by uploading `<file>.uploading` and renaming it over the old one, so the page never sees a missing or half-written manifest;
+  3. deletes the files of photos no longer wanted.
+
+  With nothing changed it doesn't connect at all. An interrupted run is safe: a photo is recorded only once all its sizes are up, so it's simply uploaded again next time.
+- **`--verify`** (automatic when nothing is recorded for the folder yet, e.g. the first run after upgrading) lists each size folder once. Photos already complete on the server are **adopted** without re-uploading, incomplete ones are uploaded again, stray psort photos are deleted, and the old unused full-size copies are removed. Use it if files were changed on the server by hand.
+- **Re-rendering everything:** bump `browse.RENDER_VERSION` when sizes or rendering change.
+- **Dry run** reports the plan from the records (no server needed) and renders just the new photos into `<state_dir>/publish/browse/`.
+
 **Turbify FTP facts, verified 2026-09-26:**
 - Only port 21 is open. SFTP (22) is closed, so use FTPS.
 - The TLS certificate names **`cpanel292.turbify.biz`**, not `ftp.itsallonesong.com`, so psort connects to cpanel292.
@@ -340,7 +353,7 @@ Run with `uv run psort …` from the repo.
 | `backup [--out DIR] [--include-caches]` | Archives the config directory and the state directory (DB, face models) into a dated, commit-tagged `.tar.gz`; `--out` defaults to `~/psort-backups/` (§12). Also available as a **Backup** page in the review UI |
 | `restore ARCHIVE [--relocate] [--force]` | Restores `psort.toml` (plus other config files) and the state directory from a backup. `--relocate` walks every path in the restored config (each inbox in order, library, outbox, videos, unsorted, highlights, state_dir), showing which exist on this computer; Enter keeps one. Everything is unpacked and edited in a staging folder first; existing config/state is only replaced with `--force` and is moved aside (`*.before-restore-<time>`), never deleted. Close `psort review` first (§12) |
 | `relocate` | Same path-by-path review for the current `psort.toml` (new drive letter, moved folder). Keeps the previous file as `psort.toml.before-relocate`; comments are preserved |
-| `publish-browse [--dry-run] [--remote-dir]` | Publishes every favorite that isn't 🔒 private plus a JSON manifest for the browse page, with a CORS rule for the blog's origin. Afterwards it removes from the server the copies of photos no longer wanted (un-starred or marked private), found from the `640/` listing; only psort's photo file names are deleted. `--remote-dir` (default `pics/browse`) may not be the blog's photo folder |
+| `publish-browse [--dry-run] [--verify] [--remote-dir]` | Publishes favorites that aren't 🔒 private for the browse page (§8.1), **incrementally**: only new photos are rendered and uploaded, removed ones (un-starred or private) are deleted, and the manifest is replaced only if it changed. With nothing to do it doesn't connect. `--verify` also checks the server listing (automatic the first time). `--remote-dir` (default `pics/browse`) may not be the blog's photo folder |
 
 ## 10. Tech Stack
 
@@ -386,12 +399,12 @@ Run with `uv run psort …` from the repo.
 - **2026-10-06:** `psort run` refuses to start while another `run` is active (a run had been left paused with Ctrl+Z while a second one ran for 17 hours) (§9).
 - **2026-10-08:** favorites and the browse page are fine to publish (§1 reworded). Added the **🔒 private** flag (§5.9): never published (blog, export, browse page), with a Library **🔒 Private** view and a day-page **🔒 Private** filter for reviewing them; `publish-browse` now also removes un-starred/private photos from the server. Fixed the Library page hiding the nav-bar counts. The library is now ~100,000 photos (73,000 moments).
 - **2026-10-08 (later):** fast clicks (§6): a review click took ~3 s and a combine ~7 s; both now redo only the moments they change (~15 ms plus file moves), POSTs are serialized by a lock, and the day page updates cards in place with `fetch()`. Checked in headless Chrome with a test library.
+- **2026-10-08 (night):** `publish-browse` is incremental (§8.1): records of what's on the server, new photos only, atomic manifest, no full-size copies, `index.html` against folder listing, `--verify` (automatic the first time, adopting what's already there).
 - **2026-10-08 (evening):** day page shift+click range select, a sticky selection row (N selected · Clear), drag a photo onto another to combine, and Undo after every combine (§6).
 
 ### Backlog and ideas (not built)
 - **Faster review, next steps** (scoped clicks, in-place day page, shift+click, drag-to-combine and Undo are done, §6): keyboard shortcuts (f/t/x/c), and Undo for split and delete. Opening a day page still takes ~0.5–0.7 s on the big library because `folders()` scans every photo to build the day navigation; cache or narrow that.
 - **Big time-less days:** photos dated only by folder are never grouped (e.g. 2025-12-01 has 3,020 single-photo moments). Group them by perceptual hash within the day; page very large days.
-- **`publish-browse` efficiency:** keep renders in a cache instead of re-rendering every favorite each run, record uploads in the DB instead of a SIZE round trip per file, skip the unused base `<name>.jpg`, replace the manifest atomically (upload then rename), add `Options -Indexes`.
 - **People filter** on day pages and in search, beyond Favorites. Optionally, favor shots where family faces are sharp.
 - **Eyes-open / smile** scoring.
 - **`psort prune`:** delete `_alternates`/`_duplicates` after review, with a preview.
@@ -439,7 +452,7 @@ Run with `uv run psort …` from the repo.
   - each has a `library_path` relative to its root
 - **Review state:**
   - `named_events`, `people`, `faces` (embedding BLOB, `person_id`, `label_source`, `cluster`, `ignored`), `face_rejections`
-  - `photos.private` (never published), `tags`, `favorites`, `highlights` (the files psort wrote), `tray` (with `position`), `post_draft`, `exports`, `reviewed` (day, plus `photos_sig`/`moments_sig`/`photo_count` fingerprint), `library_pins` (moments shown on the Library page)
+  - `browse_published` / `browse_files` (what `publish-browse` has on the server), `photos.private` (never published), `tags`, `favorites`, `highlights` (the files psort wrote), `tray` (with `position`), `post_draft`, `exports`, `reviewed` (day, plus `photos_sig`/`moments_sig`/`photo_count` fingerprint), `library_pins` (moments shown on the Library page)
   - `deleted_photos` (with `trash_path`, `purged`, and the full row as JSON)
 
 ### Gotchas

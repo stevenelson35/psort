@@ -469,8 +469,10 @@ def blog_login(
 def publish_browse_cmd(
     dry_run: Annotated[bool, typer.Option(help="Render and stage files, but don't upload.")] = False,
     remote_dir: Annotated[str, typer.Option(help="Turbify folder for browse images and the manifest.")] = "pics/browse",
+    verify: Annotated[bool, typer.Option(help="Also list the server and repair anything missing or extra "
+                                              "(automatic the first time).")] = False,
 ) -> None:
-    """Publish every favorite (web-size copies + a slim JSON manifest) for the photo browser page."""
+    """Publish favorites (not private ones) for the photo browser page: only what changed since last time."""
     cfg, conn = _open()
     try:
         s = blog_mod.settings(_config_path)
@@ -484,11 +486,10 @@ def publish_browse_cmd(
     s = dataclasses.replace(s, remote_dir=remote_dir)
     password = None if dry_run else blog_mod.load_password()
     try:
-        out = browse_mod.publish(cfg, conn, s, password, dry_run=dry_run, log=typer.echo)
+        browse_mod.publish(cfg, conn, s, password, dry_run=dry_run, log=typer.echo, verify=verify)
     except (browse_mod.BrowseError, blog_mod.BlogError) as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from e
-    typer.echo(f"Files staged in {out}")
 
 
 @app.command("reconcile")

@@ -152,6 +152,25 @@ CREATE TABLE IF NOT EXISTS favorites (
     added_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- What `psort publish-browse` has put on the server, so each run uploads only what changed.
+-- One row per published photo (all its responsive sizes are up there), per remote folder.
+CREATE TABLE IF NOT EXISTS browse_published (
+    remote_dir   TEXT NOT NULL,
+    name         TEXT NOT NULL,           -- the photo's library name; files are <size>/<name>-<size>.jpg
+    sha256       TEXT NOT NULL,
+    version      INTEGER NOT NULL,        -- browse.RENDER_VERSION it was rendered with
+    uploaded_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (remote_dir, name)
+);
+
+-- The other published files (manifest, .htaccess, index.html) and a digest of what was uploaded.
+CREATE TABLE IF NOT EXISTS browse_files (
+    remote_dir   TEXT NOT NULL,
+    path         TEXT NOT NULL,
+    digest       TEXT NOT NULL,
+    PRIMARY KEY (remote_dir, path)
+);
+
 -- Web-size copies of favorites that psort has written to highlights/ (so it only ever touches its own files).
 CREATE TABLE IF NOT EXISTS highlights (
     sha256    TEXT PRIMARY KEY,

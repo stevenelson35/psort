@@ -75,7 +75,7 @@ uv run psort faces list | crops | label <name> --group <id> | unlabel --face <id
 uv run psort backup [--out DIR] [--include-caches]    # archive config + state (DB, face models) to a dated .tar.gz; caches skipped unless asked
 uv run psort restore <archive> --relocate  # restore a backup on a new computer, fixing paths as you go
 uv run psort relocate                      # review/edit the paths in psort.toml
-uv run psort publish-browse [--dry-run]    # publish favorites (not 🔒 private) + manifest for the browse page; removes un-starred/private ones from the server
+uv run psort publish-browse [--dry-run] [--verify]   # update the browse page: uploads only new favorites (not 🔒 private), removes un-starred/private ones
 ```
 
 Photos can be JPEG, HEIC/HEIF, PNG, TIFF, GIF or WebP. Anything psort can't read as an image (including damaged photos) is kept in `unsorted_files/`; `psort recover` (also offered at the end of `psort run`) re-saves what can be read of a damaged image as a new library photo and leaves the original alone.
