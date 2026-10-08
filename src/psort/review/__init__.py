@@ -2,6 +2,7 @@
 
 import atexit
 import calendar as calendar_mod
+import json
 import os
 import secrets
 import threading
@@ -434,7 +435,23 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         if len(rows) != len(set(shas)) or any(not r["is_best"] or not r["library_path"].startswith(prefix)
                                               for r in rows):
             return fail("Choose best-shot cards from this day only.", url_for("folder", key=key))
+        if wants_json():
+            # The day page offers Undo (a drag onto the wrong photo is easy), so send back what it needs.
+            undo = actions.moments_snapshot(db(), shas)
+            try:
+                n = actions.combine_moments(cfg, db(), shas)
+            except actions.ActionError as e:
+                return fail(str(e), url_for("folder", key=key))
+            return jsonify(ok=True, combined=n, undo=json.dumps(undo))
         return act(actions.combine_moments, cfg, db(), shas, default=url_for("folder", key=key))
+
+    @app.post("/folder/<path:key>/uncombine")
+    def uncombine_moments(key):
+        try:
+            snapshot = json.loads(request.form.get("undo", ""))
+        except ValueError:
+            return fail("Nothing to undo.", url_for("folder", key=key))
+        return act(actions.restore_moments, cfg, db(), snapshot, default=url_for("folder", key=key))
 
     @app.post("/moment/<moment_id>/split")
     def split_moment(moment_id):

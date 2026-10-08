@@ -117,6 +117,53 @@ def combine_moments(cfg: Config, conn: sqlite3.Connection, photo_shas: list[str]
     return len(moment_ids)
 
 
+def moments_snapshot(conn: sqlite3.Connection, photo_shas: list[str]) -> dict:
+    """What combining the moments of these photos would change, so it can be undone exactly: each
+    member's moment, manual override and explicit pick, and which of the moments were pinned."""
+    shas = sorted(set(photo_shas))
+    marks = ",".join("?" * len(shas)) or "NULL"
+    moment_ids = sorted({r[0] for r in conn.execute(f"SELECT moment_id FROM photos WHERE sha256 IN ({marks})", shas)})
+    moment_marks = ",".join("?" * len(moment_ids)) or "NULL"
+    members = conn.execute(
+        f"""SELECT p.sha256, p.moment_id, p.user_best, o.moment_id AS override FROM photos p
+            LEFT JOIN moment_overrides o ON o.sha256 = p.sha256 WHERE p.moment_id IN ({moment_marks})""",
+        moment_ids,
+    ).fetchall()
+    pins = [r[0] for r in conn.execute(f"SELECT moment_id FROM library_pins WHERE moment_id IN ({moment_marks})",
+                                       moment_ids)]
+    return {"members": [dict(r) for r in members], "pins": pins}
+
+
+def restore_moments(cfg: Config, conn: sqlite3.Connection, snapshot: dict) -> int:
+    """Undo a combine: put every member back in its old moment, with its old override and pick, and
+    the old moments' pins. Returns how many moments there are again."""
+    members = snapshot.get("members") or []
+    if not members:
+        raise ActionError("Nothing to undo.")
+    shas = [m["sha256"] for m in members]
+    marks = ",".join("?" * len(shas))
+    now = {r["sha256"]: r["moment_id"] for r in conn.execute(
+        f"SELECT sha256, moment_id FROM photos WHERE sha256 IN ({marks})", shas)}
+    if len(now) != len(shas):
+        raise ActionError("Can't undo: some of those photos have been deleted since.")
+    touched = set(now.values()) | {m["moment_id"] for m in members}
+    keep = _reviewed_days_of_moments(conn, set(now.values()))
+    for m in members:
+        if m["override"] is None:
+            conn.execute("DELETE FROM moment_overrides WHERE sha256 = ?", (m["sha256"],))
+        else:
+            conn.execute("INSERT OR REPLACE INTO moment_overrides (sha256, moment_id) VALUES (?, ?)",
+                         (m["sha256"], m["override"]))
+        conn.execute("UPDATE photos SET user_best = ? WHERE sha256 = ?", (int(bool(m["user_best"])), m["sha256"]))
+    touched_marks = ",".join("?" * len(touched))
+    conn.execute(f"DELETE FROM library_pins WHERE moment_id IN ({touched_marks})", sorted(touched))
+    conn.executemany("INSERT OR IGNORE INTO library_pins (moment_id) VALUES (?)", [(m,) for m in snapshot.get("pins", [])])
+    conn.commit()
+    refresh(cfg, conn, moments=regroup(cfg, conn, {m["sha256"]: m["moment_id"] for m in members}))
+    _remark(conn, keep)
+    return len({m["moment_id"] for m in members})
+
+
 def split_moment(cfg: Config, conn: sqlite3.Connection, moment_id: str, photo_shas: list[str]) -> int:
     """Move selected photos into their own persistent moment; return photos moved."""
     shas = sorted(set(photo_shas))

@@ -47,7 +47,7 @@ uv run psort verify         # are all configured input directories safely copied
 ```
 
 In the review UI you can:
-- pick best shots and resolve close calls, or combine/split moments by hand when bursts should (or shouldn't) be grouped together
+- pick best shots and resolve close calls, or combine/split moments by hand when bursts should (or shouldn't) be grouped together: on a day page, drag one photo onto another (or shift+click a range and Combine), with Undo
 - name events and faces, and fix dates, one photo at a time or many at once
 - identify, correct, or ignore a detected face right from its photo, not just from the Faces pages
 - star favorites (preferred automatically as a moment's best shot over the plain top score), mark ◆ top picks (always favorites too; copied flat to `top_picks/`), and delete junk (it goes to a trash you can restore from)

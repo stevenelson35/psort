@@ -96,7 +96,7 @@ def test_fetch_combine_and_reload_drops_the_combined_away_moment(ui, tmp_path):
     picks = bests(tmp_path)
     ids = [p["moment_id"] for p in picks[:2]]
     resp = fetch(ui, f"/folder/{DAY}/combine", photo=[p["sha256"] for p in picks[:2]])
-    assert resp.get_json() == {"ok": True}
+    assert resp.get_json()["ok"] and resp.get_json()["combined"] == 2
     cards = ui.get(f"/folder/{DAY}/cards", query_string=[("m", i) for i in ids]).get_json()
     assert cards["html"].count('class="day-photo"') == 1 and cards["moments"] == 4
 
@@ -108,3 +108,42 @@ def test_day_page_uses_in_place_updates(ui, tmp_path):
     page = ui.get(f"/folder/{DAY}").get_data(as_text=True)
     assert f'"/folder/{DAY}/cards"' in page and 'id="day-toast"' in page and 'id="day-moment-count"' in page
     assert page.count('class="day-photo"') == 5 and "this.form.requestSubmit()" in page
+
+
+def test_undo_combine_restores_moments_picks_and_pins_exactly(ui, tmp_path):
+    burst = sha_of(tmp_path, "20260703_145634")
+    alternate = sha_of(tmp_path, "20260703_145636")["sha256"]
+    ui.post_ok(f"/photo/{alternate}/best")  # an explicit pick that combining clears
+    picks = bests(tmp_path)
+    ui.post_ok(f"/moment/{picks[1]['moment_id']}/pin", pinned="1")
+    conn = db(tmp_path)
+    before = snapshot(conn)
+    pins_before = {r[0] for r in conn.execute("SELECT moment_id FROM library_pins")}
+    overrides_before = {tuple(r) for r in conn.execute("SELECT * FROM moment_overrides")}
+    user_best_before = {tuple(r) for r in conn.execute("SELECT sha256, user_best FROM photos")}
+    conn.close()
+
+    result = fetch(ui, f"/folder/{DAY}/combine", photo=[p["sha256"] for p in picks[:3]]).get_json()
+    assert result["ok"] and result["combined"] == 3
+    assert len({sha_of(tmp_path, n)["moment_id"] for n in ("20260703_145634", "20260703_145640")}) == 1
+
+    assert fetch(ui, f"/folder/{DAY}/uncombine", undo=result["undo"]).get_json() == {"ok": True}
+    conn = db(tmp_path)
+    assert snapshot(conn) == before
+    assert {r[0] for r in conn.execute("SELECT moment_id FROM library_pins")} == pins_before
+    assert {tuple(r) for r in conn.execute("SELECT * FROM moment_overrides")} == overrides_before
+    assert {tuple(r) for r in conn.execute("SELECT sha256, user_best FROM photos")} == user_best_before
+    conn.close()
+    assert_same_as_full_refresh(ui, tmp_path)
+    assert sha_of(tmp_path, "20260703_145634")["moment_id"] == burst["moment_id"]
+
+
+def test_undo_with_nothing_to_undo_says_so(ui, tmp_path):
+    resp = fetch(ui, f"/folder/{DAY}/uncombine", undo="not json")
+    assert resp.status_code == 400 and resp.get_json()["error"] == "Nothing to undo."
+
+
+def test_day_page_offers_drag_shift_click_and_undo(ui, tmp_path):
+    page = ui.get(f"/folder/{DAY}").get_data(as_text=True)
+    assert 'id="selected-count"' in page and 'id="day-toast-undo"' in page
+    assert f'"/folder/{DAY}/uncombine"' in page and "dragstart" in page and "event.shiftKey" in page

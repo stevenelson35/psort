@@ -66,19 +66,23 @@
     <button type="button" data-photo-mode="fill" aria-pressed="false">Fill</button>
   </div>
   {{ image_zoom("day-photos") }}
-  <form method="post" action="{{ url_for('delete_photos') }}" id="bulkdel" class="row"
+  <form method="post" action="{{ url_for('delete_photos') }}" id="bulkdel" class="row bulk-bar"
         onsubmit="return this.dataset.action === 'combine' || confirm('Move the ticked photos to the trash?')">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="next" value="{{ request.path }}">
-    <span class="muted">Click a photo to see its moment. Select photos from separate moments to combine, or tick photos to</span>
+    <span class="muted">Click a photo to see its moment. Select photos from separate moments to combine (or drag one
+      photo onto another; shift+click selects a range), or tick photos to</span>
     <button class="danger" onclick="this.form.dataset.action = 'delete'">🗑 Delete ticked</button>
-    <button type="submit" formaction="{{ url_for('combine_moments', key=info.key) }}"
+    <button type="submit" formaction="{{ url_for('combine_moments', key=info.key) }}" id="combine-button"
             onclick="this.form.dataset.action = 'combine'">Combine selected moments</button>
+    <span id="selection" hidden><span id="selected-count"></span>
+      <button type="button" id="clear-selection">Clear</button></span>
   </form>
   <div class="grid zoomable-grid day-photos" id="day-photos" data-photo-mode="fit">{% for p in photos %}
     {{ day_card(p, photo_people, pinned, request.path) }}
   {% endfor %}</div>
-  <div id="day-toast" class="flash error toast" role="alert" hidden></div>
+  <div id="day-toast" class="flash toast" role="status" hidden><span id="day-toast-text"></span>
+    <button type="button" id="day-toast-undo" hidden>Undo</button></div>
   <p class="muted small" id="day-filter-empty" hidden>No photos match the selected filters.</p>
   <p class="muted small">Deleting a moment's best shot deletes just that shot; the next best takes its place.</p>
   <script>
@@ -152,17 +156,24 @@
       const cardsUrl = {{ url_for('folder_cards', key=info.key)|tojson }};
       const toast = document.getElementById("day-toast");
       let toastTimer;
-      function showError(message) {
-        toast.textContent = message;
+      const toastText = document.getElementById("day-toast-text");
+      const undoButton = document.getElementById("day-toast-undo");
+      let undoData = null;
+      function showMessage(message, kind, undo) {
+        toastText.textContent = message;
+        toast.className = "flash toast " + kind;
+        undoData = undo || null;
+        undoButton.hidden = !undoData;
         toast.hidden = false;
         clearTimeout(toastTimer);
-        toastTimer = setTimeout(() => { toast.hidden = true; }, 8000);
+        toastTimer = setTimeout(() => { toast.hidden = true; undoData = null; }, undo ? 15000 : 8000);
       }
-      async function send(form, submitter) {
+      const showError = message => showMessage(message, "error");
+      async function send(form, submitter, body) {
         // A button's formAction is the page's own URL unless it sets formaction, so check the attribute.
         const action = submitter && submitter.hasAttribute("formaction") ? submitter.formAction : form.action;
         const response = await fetch(action, {
-          method: "POST", body: new FormData(form, submitter), headers: {"X-Requested-With": "fetch"},
+          method: "POST", body: body || new FormData(form, submitter), headers: {"X-Requested-With": "fetch"},
         });
         let result;
         try {
@@ -173,6 +184,7 @@
             : "Something went wrong (" + response.status + ")."};
         }
         if (!result.ok) throw new Error(result.error);
+        return result;
       }
       async function reloadMoments(momentIds) {
         const query = new URLSearchParams(momentIds.map(id => ["m", id]));
@@ -211,19 +223,118 @@
       });
 
       const bulk = document.getElementById("bulkdel");
-      bulk.addEventListener("submit", async event => {
-        if (bulk.dataset.action !== "combine") return;  // Delete ticked reloads the page as before
-        event.preventDefault();
-        const ticked = allCards().filter(card => card.querySelector("input[name=photo]").checked);
-        const momentIds = [...new Set(ticked.map(card => card.dataset.moment))];
-        ticked.forEach(card => card.classList.add("busy"));
+      const combineUrl = document.getElementById("combine-button").formAction;
+      const uncombineUrl = {{ url_for('uncombine_moments', key=info.key)|tojson }};
+      const tickBox = card => card.querySelector("input[name=photo]");
+      const ticked = () => allCards().filter(card => tickBox(card).checked);
+
+      // Combine these cards' moments (from the button or a drag), then offer Undo.
+      async function combine(cards) {
+        const momentIds = [...new Set(cards.map(card => card.dataset.moment))];
+        const form = new FormData();
+        form.append("csrf", bulk.elements.csrf.value);
+        cards.forEach(card => form.append("photo", card.dataset.sha));
+        cards.forEach(card => card.classList.add("busy"));
         try {
-          await send(bulk, event.submitter);
+          const response = await fetch(combineUrl, {method: "POST", body: form, headers: {"X-Requested-With": "fetch"}});
+          let result;
+          try { result = await response.json(); } catch { result = {ok: false, error: "Something went wrong (" + response.status + ")."}; }
+          if (!result.ok) throw new Error(result.error);
           await reloadMoments(momentIds);
+          updateSelection();
+          showMessage("Combined " + result.combined + " moments.", "ok", {undo: result.undo, momentIds});
         } catch (error) {
-          ticked.forEach(card => card.classList.remove("busy"));
+          cards.forEach(card => card.classList.remove("busy"));
           showError(error.message);
         }
+      }
+      bulk.addEventListener("submit", event => {
+        if (bulk.dataset.action !== "combine") return;  // Delete ticked reloads the page as before
+        event.preventDefault();
+        combine(ticked());
+      });
+      undoButton.addEventListener("click", async () => {
+        if (!undoData) return;
+        const {undo, momentIds} = undoData;
+        undoData = null;
+        toast.hidden = true;
+        const form = new FormData();
+        form.append("csrf", bulk.elements.csrf.value);
+        form.append("undo", undo);
+        try {
+          await send({action: uncombineUrl}, null, form);
+          await reloadMoments(momentIds);
+          showMessage("Undone: the moments are separate again.", "ok");
+        } catch (error) {
+          showError(error.message);
+        }
+      });
+
+      // Selection: a running count, Clear, and shift+click to tick (or untick) every visible card between.
+      const selection = document.getElementById("selection");
+      function updateSelection() {
+        const n = ticked().length;
+        selection.hidden = n === 0;
+        document.getElementById("selected-count").textContent = n + " selected";
+      }
+      document.getElementById("clear-selection").addEventListener("click", () => {
+        allCards().forEach(card => { tickBox(card).checked = false; });
+        updateSelection();
+      });
+      let lastTicked = null;  // sha of the last box clicked (cards get replaced, so not the element)
+      grid.addEventListener("click", event => {
+        const box = event.target.closest("input[name=photo]");
+        if (!box) return;
+        if (event.shiftKey && lastTicked) {
+          const visible = allCards().filter(card => !card.hidden);
+          const from = visible.findIndex(card => card.dataset.sha === lastTicked);
+          const to = visible.findIndex(card => card.dataset.sha === box.value);
+          if (from !== -1 && to !== -1) {
+            visible.slice(Math.min(from, to), Math.max(from, to) + 1).forEach(card => { tickBox(card).checked = box.checked; });
+          }
+        }
+        lastTicked = box.value;
+        updateSelection();
+      });
+
+      // Drag a photo onto another to combine their moments. If the dragged photo is ticked, every
+      // ticked photo comes along. Only a moment's best shot can be combined (not favorite/private alternates).
+      let dragged = null;
+      const combinable = card => card && card.dataset.alternate === "false" && !card.classList.contains("busy");
+      grid.addEventListener("dragstart", event => {
+        const card = event.target.closest(".day-photo");
+        if (!combinable(card) || event.target.closest("form")) { dragged = null; return; }
+        dragged = card;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", card.dataset.sha);
+        const group = tickBox(card).checked ? ticked() : [card];
+        group.forEach(c => c.classList.add("dragging"));
+      });
+      const clearDropTargets = () => grid.querySelectorAll(".drop-target").forEach(c => c.classList.remove("drop-target"));
+      grid.addEventListener("dragover", event => {
+        if (!dragged) return;
+        const target = event.target.closest(".day-photo");
+        clearDropTargets();
+        if (!combinable(target) || target.dataset.moment === dragged.dataset.moment) return;
+        event.preventDefault();  // allows the drop
+        event.dataTransfer.dropEffect = "move";
+        target.classList.add("drop-target");
+      });
+      grid.addEventListener("drop", event => {
+        if (!dragged) return;
+        event.preventDefault();  // never follow the dragged photo's link
+        const target = event.target.closest(".day-photo");
+        const group = tickBox(dragged).checked ? ticked() : [dragged];
+        dragged = null;
+        clearDropTargets();
+        grid.querySelectorAll(".dragging").forEach(c => c.classList.remove("dragging"));
+        if (!combinable(target) || group.includes(target)) return;
+        combine([...group, target]);
+      });
+      grid.addEventListener("dragend", () => {
+        dragged = null;
+        clearDropTargets();
+        grid.querySelectorAll(".dragging").forEach(c => c.classList.remove("dragging"));
       });
     })();
   </script>
