@@ -653,7 +653,11 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
 
     @app.post("/faces/unlabel")
     def faces_unlabel():
-        return act(faces_mod.unlabel, cfg, db(), [int(i) for i in request.form.getlist("face")], default="/faces")
+        ticked = sorted({int(i) for i in request.form.getlist("face")})
+        if not ticked:
+            flash("No faces selected.", "error")
+            return back("/faces")
+        return act(faces_mod.unlabel, cfg, db(), ticked, default="/faces")
 
     @app.post("/faces/<int:face_id>/identify")
     def face_identify(face_id):

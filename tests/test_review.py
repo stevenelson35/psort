@@ -332,7 +332,9 @@ def test_name_faces(ui, tmp_path):
     assert rows[2]["person_id"] is None  # unticked = "not Alice": not auto-matched despite looking alike
     person_id = rows[1]["person_id"]
     assert "Alice" in text(ui.get("/faces"))
-    assert "Not Alice" in text(ui.get(f"/faces/person/{person_id}"))
+    person_page = text(ui.get(f"/faces/person/{person_id}"))
+    assert "Not Alice" in person_page
+    assert 'name="face" value="1"' in person_page
 
     ui.post_ok("/faces/unlabel", face="1")
     assert conn.execute("SELECT COUNT(*) FROM people").fetchone()[0] == 0

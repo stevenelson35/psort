@@ -1,19 +1,37 @@
 {% extends "base.html" %}
-{% from "_macros.html" import post %}
 {% block title %}{{ person.name }}{% endblock %}
 {% block content %}
 <p><a href="{{ url_for('faces') }}">← Faces</a></p>
 <h1>{{ person.name }}</h1>
-<p class="muted">Automatic matches are listed first, least certain first. Click "Not {{ person.name }}" on any mistake.</p>
-<div class="faces">
-  {% for f in faces %}
-    <figure class="face-card">
-      <a href="{{ url_for('moment', moment_id=f.moment_id) }}"><img src="{{ url_for('face_thumb', face_id=f.id) }}" loading="lazy" alt="face {{ f.id }}"></a>
-      <figcaption>
-        {% if f.label_source == 'auto' %}<span class="muted">match {{ "%.2f"|format(f.similarity) }}</span>{% else %}<span class="pill ok">named</span>{% endif %}
-        {{ post(url_for('faces_unlabel'), "Not " ~ person.name, fields={"face": f.id}) }}
-      </figcaption>
-    </figure>
-  {% endfor %}
-</div>
+<p class="muted">Automatic matches are listed first, least certain first. Tick every mistake, then click
+  "Not {{ person.name }}" once. Click a face to see its photo.</p>
+<form method="post" action="{{ url_for('faces_unlabel') }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+  <div class="row sticky-bar">
+    <button class="ok">Not {{ person.name }}: ticked faces</button>
+    <button type="button" onclick="document.querySelectorAll('input[name=face]').forEach(c => c.checked = true); count()">Tick all</button>
+    <button type="button" onclick="document.querySelectorAll('input[name=face]').forEach(c => c.checked = false); count()">Untick all</button>
+    <span class="muted" id="ticked">0 ticked</span>
+  </div>
+  <div class="faces">
+    {% for f in faces %}
+      <figure class="face-card">
+        <div class="face">
+          <input type="checkbox" name="face" value="{{ f.id }}" onchange="count()" aria-label="Not {{ person.name }}">
+          <a href="{{ url_for('moment', moment_id=f.moment_id) }}" target="_blank"><img src="{{ url_for('face_thumb', face_id=f.id) }}" loading="lazy" alt="face {{ f.id }}"></a>
+        </div>
+        <figcaption>
+          {% if f.label_source == 'auto' %}<span class="muted">match {{ "%.2f"|format(f.similarity) }}</span>{% else %}<span class="pill ok">named</span>{% endif %}
+        </figcaption>
+      </figure>
+    {% endfor %}
+  </div>
+</form>
+<script>
+  function count() {
+    document.getElementById("ticked").textContent =
+      document.querySelectorAll("input[name=face]:checked").length + " ticked";
+  }
+</script>
 {% endblock %}
