@@ -89,6 +89,10 @@ def test_publish_uploads_images_and_replaces_the_manifest(psort, tmp_path, ftp_s
     assert manifest_path.exists()
     cors = (root / "pics/browse/.htaccess").read_text()
     assert 'Access-Control-Allow-Origin "https://blog.itsallonesong.com"' in cors
+    # Align may read it too, but only for requests from Align (the blog line stays unconditional).
+    assert 'SetEnvIf Origin "^https://align\\.itsallonesong\\.com$" PSORT_CORS_1' in cors
+    assert 'Header always set Access-Control-Allow-Origin "https://align.itsallonesong.com" env=PSORT_CORS_1' in cors
+    assert cors.index("blog.itsallonesong.com") < cors.index("align.itsallonesong.com")
     assert not (root / "pics/browse/20260703_145634.jpg").exists()  # the page only uses the sizes
     assert (root / "pics/browse/640/20260703_145634-640.jpg").exists()
     assert (root / "pics/browse/2048/20260703_145634-2048.jpg").exists()

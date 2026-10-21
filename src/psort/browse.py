@@ -36,6 +36,8 @@ RENDER_VERSION = 1
 # An empty page so the folder can't be listed in a browser (safer than "Options -Indexes" in
 # .htaccess, which breaks the whole folder if the host doesn't allow that override).
 INDEX_HTML = "<!doctype html><title></title>\n"
+# Other sites allowed to read the manifest: the family app (Align) picks blog photos and shows "On this day".
+ALSO_ALLOWED = ("https://align.itsallonesong.com",)
 
 
 class BrowseError(Exception):
@@ -83,12 +85,26 @@ def _size_paths(name: str) -> list[str]:
 
 
 def _cors(settings: BlogSettings) -> str:
+    """Let the blog's browse page (and the family app, ALSO_ALLOWED) read the manifest from another origin.
+
+    The blog line is unconditional, exactly as before. Each extra origin is a separate line that applies only when
+    the request comes from it (SetEnvIf + env=), with a fixed value and no variable expansion, so if a server
+    ignored those directives the blog would still work. The photos themselves need no CORS (plain <img>)."""
     origin = urlsplit(settings.site_url)
     if not origin.scheme or not origin.netloc:
         raise BrowseError(f"Invalid site URL for CORS: {settings.site_url!r}")
-    return ("<IfModule mod_headers.c>\n"
-            f'  Header always set Access-Control-Allow-Origin "{origin.scheme}://{origin.netloc}"\n'
-            "</IfModule>\n")
+    lines = ["<IfModule mod_headers.c>",
+             f'  Header always set Access-Control-Allow-Origin "{origin.scheme}://{origin.netloc}"']
+    extra = [o for o in ALSO_ALLOWED if o != f"{origin.scheme}://{origin.netloc}"]
+    for i, o in enumerate(extra, 1):
+        pattern = "^" + o.replace(".", r"\.") + "$"
+        lines += ["  <IfModule mod_setenvif.c>",
+                  f'    SetEnvIf Origin "{pattern}" PSORT_CORS_{i}',
+                  f'    Header always set Access-Control-Allow-Origin "{o}" env=PSORT_CORS_{i}',
+                  "  </IfModule>"]
+    if extra:
+        lines.append("  Header always append Vary Origin")
+    return "\n".join(lines + ["</IfModule>"]) + "\n"
 
 
 @dataclass
