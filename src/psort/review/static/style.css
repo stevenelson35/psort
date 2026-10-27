@@ -178,3 +178,15 @@ button.danger:hover { background: var(--error-bg); }
 .day-photo.dragging { opacity: .45; }
 .day-photo.drop-target .card { outline: 3px dashed var(--accent); outline-offset: 2px; }
 .toast button { margin-left: .6rem; }
+
+/* Moment page: Select on each shot's corner to take it out of the moment; the bar at the bottom acts on them. */
+.shot { position: relative; }
+.pick-shot { position: absolute; top: .5rem; left: .5rem; z-index: 2; display: flex; align-items: center; gap: .4rem;
+  padding: .3rem .6rem; border-radius: 999px; background: rgba(0, 0, 0, .65); color: #fff; font-size: .9rem; cursor: pointer; }
+.pick-shot input { width: 1.1rem; height: 1.1rem; margin: 0; cursor: pointer; }
+.shot.picked { outline: 3px solid #e3a008; outline-offset: -3px; }
+.shot.picked .pick-shot { background: #e3a008; color: #111; }
+.split-bar { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 20; display: flex;
+  align-items: center; gap: .75rem; padding: .6rem 1rem; border-radius: 999px; background: var(--surface);
+  border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0, 0, 0, .45); }
+.split-bar[hidden] { display: none; }

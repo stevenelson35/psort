@@ -17,21 +17,27 @@
   <form method="post" action="{{ url_for('split_moment', moment_id=moment_id) }}" id="split-moment" class="row">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="next" value="{{ request.path }}">
-    <span class="muted">Select shots to separate from this moment.</span>
-    <button>Move selected to a new moment</button>
+    <span class="muted">Wrong moment? Tick <strong>Select</strong> on the shots that don't belong, then remove them: they become a moment of their own.</span>
+    <button>Remove selected from this moment</button>
   </form>
+  {# Stays at the bottom of the screen while shots are selected, so the action is never scrolled out of reach. #}
+  <div class="split-bar" id="split-bar" hidden>
+    <span id="split-count"></span>
+    <button form="split-moment" id="split-go">Remove from this moment</button>
+    <button type="button" id="split-clear">Clear</button>
+  </div>
 {% endif %}
 {{ image_zoom("moment-photos", 420, 260, 700, 40) }}
 <datalist id="face-people">{% for name in face_people %}<option value="{{ name }}">{% endfor %}</datalist>
 <div class="shots zoomable-shots" id="moment-photos">
 {% for s in shots %}
   <section class="shot{% if s.is_best %} best{% endif %}">
+    {% if shots|length > 1 %}<label class="pick-shot" title="Select this shot to remove it from the moment"><input type="checkbox" name="photo" value="{{ s.sha256 }}" form="split-moment"> Select</label>{% endif %}
     <a href="{{ url_for('thumb', sha=s.sha256, size=1280) }}" target="_blank">
       <img src="{{ url_for('thumb', sha=s.sha256, size=1280) }}" loading="lazy" alt="{{ s.name }}">
     </a>
     <div class="meta">
       <strong>{{ s.name }}</strong>
-      {% if shots|length > 1 %}<label class="tick moment-split"><input type="checkbox" name="photo" value="{{ s.sha256 }}" form="split-moment"> move to new moment</label>{% endif %}
       {% if detected_faces.get(s.sha256) %}
         <details class="detected-faces">
           <summary>{{ detected_faces[s.sha256]|length }} detected face{{ "" if detected_faces[s.sha256]|length == 1 else "s" }} · edit identifications</summary>
@@ -121,4 +127,30 @@
   </section>
 {% endfor %}
 </div>
+{% if shots|length > 1 %}
+<script>
+  // Selected shots get highlighted, and the bottom bar shows how many with the Remove button. Removing every shot
+  // isn't allowed (the server says so too), so the button waits until at least one stays.
+  (() => {
+    const boxes = [...document.querySelectorAll('.pick-shot input')]
+    const bar = document.getElementById('split-bar')
+    const go = document.getElementById('split-go')
+    const update = () => {
+      const n = boxes.filter((b) => b.checked).length
+      boxes.forEach((b) => b.closest('.shot').classList.toggle('picked', b.checked))
+      bar.hidden = n === 0
+      const all = n === boxes.length
+      document.getElementById('split-count').textContent = all ? 'Leave at least one shot in this moment' : `${n} selected`
+      go.disabled = all
+      go.textContent = n === 1 ? 'Remove it from this moment' : 'Remove them from this moment'
+    }
+    boxes.forEach((b) => b.addEventListener('change', update))
+    document.getElementById('split-clear').addEventListener('click', () => {
+      boxes.forEach((b) => (b.checked = false))
+      update()
+    })
+    update()
+  })()
+</script>
+{% endif %}
 {% endblock %}

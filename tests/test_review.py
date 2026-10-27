@@ -136,6 +136,14 @@ def test_combine_and_split_moments_persist(ui, psort, tmp_path):
     conn.close()
 
     moment_url = f"/moment/{combined_id}"
+    # Every shot on the moment page has a Select box on its corner, tied to the split form the bar submits.
+    page = ui.get(moment_url).get_data(as_text=True)
+    for p in picks:
+        assert f'<input type="checkbox" name="photo" value="{p["sha256"]}" form="split-moment">' in page
+    conn = db(tmp_path)
+    shots = conn.execute("SELECT COUNT(*) FROM photos WHERE moment_id = ?", (combined_id,)).fetchone()[0]
+    conn.close()
+    assert page.count('class="pick-shot"') == shots and 'id="split-moment"' in page and 'form="split-moment" id="split-go"' in page
     response = ui.post_ok(f"/moment/{combined_id}/split", photo=picks[1]["sha256"], next=moment_url)
     assert response.location == moment_url
     conn = db(tmp_path)
