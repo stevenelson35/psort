@@ -7,7 +7,7 @@ import os
 import secrets
 import threading
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date as calendar_date
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +26,7 @@ from .. import faces as faces_mod
 from .. import videos as videos_mod
 from .. import blog as blog_mod
 from ..config import DEFAULT_CONFIG_PATH, Config
-from ..dates import UNCERTAIN, sql_in
+from ..dates import NO_TIME, UNCERTAIN, sql_in
 from ..db import connect
 from ..library import write_manifest
 from ..imaging import to_rgb, upright
@@ -36,6 +36,7 @@ THUMB_SIZES = {320, 1280}
 GROUP_PAGE_LIMIT = 400  # faces shown at once on a group's page
 MANIFEST_DELAY = 4.0  # seconds after the last change before manifest.json (~10 MB) is rewritten
 BACKUP_DIR = Path.home() / "psort-backups"  # where `psort backup` / the Backup page save archives
+EVENT_PREVIEW = 8  # thumbnails in an event's preview strip, spread across its time range
 MAX_DAY_THUMBS = 12  # pinned moment thumbnails shown per day on the Library page; the rest are counted
 MONTH_COVER = 6  # photos in a month's cover collage on the Library page
 LIBRARY_VIEWS = ("grouped", "list", "calendar", "favorites", "top", "private")
@@ -579,13 +580,88 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
 
     @app.get("/events")
     def events():
-        return render_template("events.html", events=events_mod.suggest(db(), cfg.event_gap_hours))
+        """Suggested events one month at a time (there are thousands), each with a preview strip, its days and
+        people, its name or a form to name it (within a named event it falls in), and See all."""
+        conn = db()
+        suggested = events_mod.suggest(conn, cfg.event_gap_hours)
+        ranges = events_mod.named_ranges(conn)
+        by_month = Counter(e.start[:7] for e in suggested)
+        years = Counter(e.start[:4] for e in suggested)
+        year = request.args.get("year", "")
+        if year not in years:
+            year = max(years) if years else ""
+        months = sorted(m for m in by_month if m.startswith(year))
+        month = request.args.get("month", "")
+        if month not in months:
+            month = months[-1] if months else ""
+        rows = []
+        for i, e in enumerate(suggested):
+            if e.start[:7] != month:
+                continue
+            overlapping = [r for r in ranges if r["start"] <= e.end and e.start <= r["end"]]
+            parent = next((r for r in overlapping if not r["parent"] and r["start"] <= e.start and e.end <= r["end"]), None)
+            later = [x for x in suggested[i + 1:i + 16] if not parent or x.end <= parent["end"]]
+            rows.append({"event": e, "preview": event_preview(conn, e.start, e.end), "parent": parent,
+                         "named": [r for r in overlapping if not r["parent"]],
+                         "within": [r for r in overlapping if r["parent"]], "later": later})
+        return render_template(
+            "events.html", rows=rows, year=year, month=month,
+            years=[(y, years[y]) for y in sorted(years, reverse=True)],
+            months=[(m, month_label(m), by_month[m]) for m in months],
+            named=[{**dict(r), "label": events_mod.pretty(r["slug"])} for r in ranges],
+            total=len(suggested))
+
+    @app.get("/events/preview")
+    def events_preview():
+        """An event's preview strip for another range: the Events page shows the whole trip as you pick "through"."""
+        preview = event_preview(db(), request.args.get("start", ""), request.args.get("end", ""))
+        html = render_template_string('{% from "_event_strip.html" import strip %}{{ strip(p) }}', p=preview)
+        return jsonify(html=html)
+
+    @app.get("/events/range")
+    def events_range():
+        """Every best shot in a time range, to check they belong together and to name some of them: a new event
+        (splitting a suggestion), or one within a named event."""
+        conn = db()
+        start, end = request.args.get("start", ""), request.args.get("end", "")
+        if not start or not end:
+            abort(404)
+        shots = range_shots(conn, start, end, cards=True)
+        ranges = events_mod.named_ranges(conn)
+        overlapping = [r for r in ranges if r["start"] <= end and start <= r["end"]]
+        days: dict[str, list] = {}
+        for s in shots:
+            days.setdefault(s["taken_at"][:10], []).append(s)
+        slugs = {s["sha256"]: events_mod.slug_for(s["taken_at"], ranges) for s in shots}
+        return render_template(
+            "events_range.html", start=start, end=end, days=days, count=len(shots), slugs=slugs,
+            tops=[r for r in overlapping if not r["parent"]], within=[r for r in overlapping if r["parent"]],
+            parent=next((r for r in overlapping if not r["parent"] and r["start"] <= start and end <= r["end"]), None),
+            pretty=events_mod.pretty, day_label=lambda d: datetime.strptime(d, "%Y-%m-%d").strftime("%a %-d %b %Y"))
 
     @app.post("/events/name")
     def events_name():
         def run():
             events_mod.name(db(), cfg.event_gap_hours, request.form["event"], request.form.get("name", ""),
-                            request.form.get("through") or None)
+                            request.form.get("through") or None, request.form.get("within") or None)
+            actions.refresh(cfg, db())
+        return act(run, default="/events")
+
+    @app.post("/events/name-photos")
+    def events_name_photos():
+        """Name the time from the first to the last selected photo (best shots carry their moment's alternates)."""
+        shas = request.form.getlist("photo")
+
+        def run():
+            if not shas:
+                raise events_mod.EventError("Select the photos that belong to the event first.")
+            rows = db().execute(f"SELECT taken_at, date_source FROM photos WHERE sha256 IN ({','.join('?' * len(shas))})",
+                                shas).fetchall()
+            times = [r["taken_at"] for r in rows if r["date_source"] not in NO_TIME]
+            if not times:
+                raise events_mod.EventError("Those photos have no exact time, so they can't be placed in an event.")
+            events_mod.name_range(db(), request.form.get("name", ""), min(times), max(times),
+                                  request.form.get("within") or None)
             actions.refresh(cfg, db())
         return act(run, default="/events")
 
@@ -797,6 +873,42 @@ def pretty_folder(key: str) -> tuple[str, str]:
         return datetime.strptime(name[:7], "%Y-%m").strftime("%B %Y"), "day unknown"
     day, _, slug = name.partition("_")
     return datetime.strptime(day, "%Y-%m-%d").strftime("%a %-d %b %Y"), slug.replace("-", " ")
+
+
+def range_shots(conn: sqlite3.Connection, start: str, end: str, cards: bool = False) -> list[sqlite3.Row]:
+    """Each moment's best shot taken within [start, end] (real times only, like events), oldest first; with
+    `cards`, everything a photo card shows."""
+    cols = f"{CARD_COLUMNS}, p.taken_at" if cards else "p.sha256, p.name, p.moment_id, p.library_path, p.taken_at"
+    return conn.execute(
+        f"""SELECT {cols} FROM photos p WHERE p.is_best = 1 AND p.duplicate_of IS NULL AND p.library_path IS NOT NULL
+              AND p.date_source NOT IN {sql_in(NO_TIME)} AND p.taken_at BETWEEN ? AND ?
+            ORDER BY p.taken_at, p.name""",
+        (start, end),
+    ).fetchall()
+
+
+def event_preview(conn: sqlite3.Connection, start: str, end: str, size: int = EVENT_PREVIEW) -> dict:
+    """What an event looks like at a glance: up to `size` best shots spread evenly across it, how many photos and
+    days it spans, and who's in it (most often first)."""
+    shots = range_shots(conn, start, end)
+    if len(shots) <= size:
+        sample = list(shots)
+    else:
+        sample = [shots[round(i * (len(shots) - 1) / (size - 1))] for i in range(size)]
+    photos = conn.execute(
+        f"SELECT COUNT(*) FROM photos WHERE date_source NOT IN {sql_in(NO_TIME)} AND taken_at BETWEEN ? AND ?",
+        (start, end),
+    ).fetchone()[0]
+    people: Counter = Counter()
+    for r in conn.execute(
+        f"""SELECT pe.name, COUNT(DISTINCT f.sha256) AS n FROM faces f JOIN people pe ON pe.id = f.person_id
+            JOIN photos p ON p.sha256 = f.sha256
+            WHERE p.date_source NOT IN {sql_in(NO_TIME)} AND p.taken_at BETWEEN ? AND ? GROUP BY pe.name""",
+        (start, end),
+    ):
+        people[r["name"]] = r["n"]
+    return {"start": start, "end": end, "sample": sample, "moments": len(shots), "photos": photos,
+            "days": len({s["taken_at"][:10] for s in shots}), "people": [n for n, _ in people.most_common(6)]}
 
 
 def picks_gallery(conn: sqlite3.Connection, which: str) -> dict:

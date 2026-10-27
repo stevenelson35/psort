@@ -93,11 +93,14 @@ CREATE TABLE IF NOT EXISTS sources (
     sha256  TEXT REFERENCES photos(sha256)
 );
 
--- Events you've named. Any photo taken within [start, end] belongs to the event.
+-- Events you've named. Any photo taken within [start, end] belongs to the event. One level of nesting: an event
+-- within another (a museum trip during a vacation) has `parent` set and the slug '<parent>/<name>', so its photos
+-- go in a sub-folder of the parent's day folders.
 CREATE TABLE IF NOT EXISTS named_events (
     slug   TEXT PRIMARY KEY,               -- lowercase-hyphenated, used in folder names
     start  TEXT NOT NULL,
-    end    TEXT NOT NULL
+    end    TEXT NOT NULL,
+    parent TEXT                            -- the event it's within, or NULL
 );
 
 CREATE TABLE IF NOT EXISTS people (
@@ -232,6 +235,8 @@ CREATE TABLE IF NOT EXISTS recoveries (
 
 CREATE INDEX IF NOT EXISTS sources_sha ON sources(sha256);
 CREATE INDEX IF NOT EXISTS photos_moment ON photos(moment_id);
+-- Events, previews and their See-all pages look photos up by time range.
+CREATE INDEX IF NOT EXISTS photos_taken ON photos(taken_at);
 CREATE INDEX IF NOT EXISTS faces_sha ON faces(sha256);
 CREATE INDEX IF NOT EXISTS faces_person ON faces(person_id);
 """
@@ -248,6 +253,7 @@ _ADDED_COLUMNS = [
     ("reviewed", "photos_sig", "TEXT"),
     ("reviewed", "moments_sig", "TEXT"),
     ("reviewed", "photo_count", "INTEGER"),
+    ("named_events", "parent", "TEXT"),  # one level of events within events
 ]
 
 

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card, post %}
+{% block title %}Event photos{% endblock %}
+{% block content %}
+<nav class="crumbs"><a href="{{ url_for('events', year=start[:4], month=start[:7]) }}">Events</a> › {{ start[:16].replace("T", " ") }} → {{ end[:16].replace("T", " ") }}</nav>
+<h1>{{ count }} moment{{ "" if count == 1 else "s" }} from {{ day_label(start[:10]) }}{% if start[:10] != end[:10] %} to {{ day_label(end[:10]) }}{% endif %}</h1>
+{% if tops or within %}
+  <p class="muted">Named here:
+    {% for n in tops %}<strong>{{ pretty(n.slug) }}</strong> ({{ n.start[:16].replace("T", " ") }} → {{ n.end[:16].replace("T", " ") }}){{ "," if not loop.last or within }} {% endfor %}
+    {% for n in within %}<strong>{{ pretty(n.slug) }}</strong> ({{ n.start[11:16] }} → {{ n.end[11:16] }}{% if n.start[:10] != n.end[:10] %}, {{ n.end[:10] }}{% endif %}) {{ post(url_for('events_unname'), "Unname", fields={"name": n.slug}, next=request.full_path.rstrip('?')) }}{% endfor %}
+  </p>
+{% endif %}
+
+<form method="post" action="{{ url_for('events_name_photos') }}" id="name-photos" class="event-select-bar">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+  <span class="muted small">Tick the photos that belong together (tick the first and last, then <strong>Select between</strong>).
+    The event covers the time from the first to the last selected photo.</span>
+  <div class="row">
+    <button type="button" id="select-between">Select between</button>
+    <button type="button" id="select-clear">Clear</button>
+    <span id="select-count" class="muted small">None selected</span>
+  </div>
+  <div class="row">
+    <input name="name" placeholder="{{ 'e.g. museum trip' if parent else 'e.g. birthday party' }}" required>
+    <select name="within" title="A new event, or one within a named event">
+      <option value="" {{ "" if parent else "selected" }}>as a new event</option>
+      {% for n in tops %}<option value="{{ n.slug }}" {{ "selected" if parent and parent.slug == n.slug else "" }}>within {{ pretty(n.slug) }}</option>{% endfor %}
+    </select>
+    <button id="name-go" disabled>Name selected</button>
+  </div>
+</form>
+
+{% for day, shots in days.items() %}
+  <h2 class="event-day">{{ day_label(day) }} <span class="muted small">{{ shots|length }}</span></h2>
+  <div class="grid event-range-grid">
+    {% for p in shots %}
+      <div class="day-photo event-photo" data-sha="{{ p.sha256 }}">
+        <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="name-photos"> select
+          <span class="muted">{{ p.taken_at[11:16] }}</span></label>
+        {% if slugs[p.sha256] %}<div class="pill {{ 'ok' if '/' not in slugs[p.sha256] else '' }}">{{ pretty(slugs[p.sha256]) }}</div>{% endif %}
+        {{ card(p, next=request.full_path.rstrip('?')) }}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="muted">No photos with an exact time in this range.</p>
+{% endfor %}
+<script>
+  (() => {
+    const boxes = [...document.querySelectorAll('.event-photo input[type=checkbox]')]
+    const count = document.getElementById('select-count')
+    const go = document.getElementById('name-go')
+    const update = () => {
+      const n = boxes.filter((b) => b.checked).length
+      boxes.forEach((b) => b.closest('.event-photo').classList.toggle('picked', b.checked))
+      count.textContent = n ? `${n} selected` : 'None selected'
+      go.disabled = n === 0
+    }
+    boxes.forEach((b) => b.addEventListener('change', update))
+    // Everything from the first ticked photo to the last (photos are in time order).
+    document.getElementById('select-between').addEventListener('click', () => {
+      const ticked = boxes.map((b, i) => (b.checked ? i : -1)).filter((i) => i >= 0)
+      if (ticked.length) boxes.slice(ticked[0], ticked[ticked.length - 1] + 1).forEach((b) => (b.checked = true))
+      update()
+    })
+    document.getElementById('select-clear').addEventListener('click', () => {
+      boxes.forEach((b) => (b.checked = false))
+      update()
+    })
+    update()
+  })()
+</script>
+{% endblock %}

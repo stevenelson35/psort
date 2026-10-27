@@ -28,7 +28,7 @@ from urllib.parse import urlsplit
 
 from .blog import SIZES, BlogSettings, Uploader, stage_images
 from .config import Config
-from .events import named_ranges, slug_for
+from .events import named_ranges, pretty, slug_for, top_slug
 
 MANIFEST_NAME = "browse-manifest.json"
 # Bump when the published images change (sizes, quality, rendering), so every photo is re-uploaded.
@@ -55,7 +55,8 @@ def favorite_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def build_manifest(conn: sqlite3.Connection) -> dict:
     """The public data behind the browse page: favorites that aren't private, by name (not sha256, and never
-    an embedding). `events` lists only named events that actually contain a favorite."""
+    an embedding). `events` lists only named events that actually contain a favorite. A photo in an event within
+    another keeps the top-level event as `event` (so filtering by the trip shows it) and adds `sub_event`."""
     rows = favorite_rows(conn)
     people: dict[str, list[str]] = {}
     for r in conn.execute(
@@ -70,12 +71,15 @@ def build_manifest(conn: sqlite3.Connection) -> dict:
     for r in rows:
         slug = slug_for(r["taken_at"], ranges)
         if slug:
-            used_events.add(slug)
-        photo = {"id": r["name"], "taken_at": r["taken_at"], "people": people.get(r["sha256"], []), "event": slug}
+            used_events.update({slug, top_slug(slug)})
+        photo = {"id": r["name"], "taken_at": r["taken_at"], "people": people.get(r["sha256"], []), "event": top_slug(slug)}
+        if slug and "/" in slug:
+            photo["sub_event"] = slug  # only present when nested, so older data and manifests are unchanged
         if r["top"]:
             photo["top"] = True  # only present on top picks, so older data and manifests are unchanged
         photos.append(photo)
-    events = [{"slug": s, "name": s.replace("-", " "), "start": by_slug[s]["start"], "end": by_slug[s]["end"]}
+    events = [{"slug": s, "name": pretty(s).rsplit(" › ", 1)[-1], "start": by_slug[s]["start"], "end": by_slug[s]["end"],
+               **({"parent": by_slug[s]["parent"]} if by_slug[s]["parent"] else {})}
               for s in sorted(used_events)]
     return {"version": 1, "photos": photos, "events": events}
 

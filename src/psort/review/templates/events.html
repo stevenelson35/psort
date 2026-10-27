@@ -1,36 +1,87 @@
 {% extends "base.html" %}
 {% from "_macros.html" import post %}
+{% from "_event_strip.html" import strip %}
 {% block title %}Events{% endblock %}
 {% block content %}
 <h1>Events</h1>
-<p class="muted">psort starts a new suggested event after a long gap in shooting. Name one to rename its day folders,
-  e.g. <code>2026-07-03_birthday-party</code>. For a trip, pick the last event in "through".</p>
-<table class="events">
-  <tr><th>Starts</th><th>Ends</th><th class="num">Photos</th><th>Name</th></tr>
-  {% for e in events %}
-    <tr>
-      <td>{{ e.start[:16].replace("T", " ") }}</td>
-      <td>{{ e.end[:16].replace("T", " ") if e.end != e.start else "" }}</td>
-      <td class="num">{{ e.photos }}</td>
-      <td>
-        {% if e.slug %}
-          <strong>{{ e.slug }}</strong> {{ post(url_for('events_unname'), "Unname", fields={"name": e.slug}) }}
-        {% else %}
-          <form method="post" action="{{ url_for('events_name') }}" class="row">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <input type="hidden" name="event" value="{{ e.id }}">
-            <input name="name" placeholder="e.g. birthday party" required>
-            <select name="through" title="Through (for multi-day events)">
-              <option value="">just this one</option>
-              {% for later in events if later.start > e.start %}{% if loop.index <= 15 %}
-                <option value="{{ later.id }}">through {{ later.start[:10] }} {{ later.start[11:16] }}</option>
-              {% endif %}{% endfor %}
-            </select>
-            <button>Name</button>
-          </form>
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
-</table>
+<p class="muted">psort suggests a new event after a long gap in shooting. Look at the preview, then name it to rename its
+  day folders (<code>2026-07-03_birthday-party</code>). For a trip, pick its last day in "through" (the preview shows
+  the whole trip). <strong>See all</strong> shows every photo, to check they belong together, name just some of them,
+  or name an event within one, like a museum trip during a vacation.</p>
+
+{% if named %}
+  <details class="named-events">
+    <summary>{{ named|length }} named event{{ "" if named|length == 1 else "s" }}</summary>
+    <ul>
+      {% for n in named %}
+        <li class="{{ 'within' if n.parent else '' }}">
+          <a href="{{ url_for('events_range', start=n.start, end=n.end) }}"><strong>{{ n.label }}</strong></a>
+          <span class="muted small">{{ n.start[:16].replace("T", " ") }} → {{ n.end[:16].replace("T", " ") }}</span>
+          {{ post(url_for('events_unname'), "Unname", fields={"name": n.slug},
+                  title="Its photos go back to plain date folders" ~ (" (and the events within it are unnamed too)" if not n.parent else "")) }}
+        </li>
+      {% endfor %}
+    </ul>
+  </details>
+{% endif %}
+
+<nav class="event-years">
+  {% for y, n in years %}<a href="{{ url_for('events', year=y) }}" class="{{ 'on' if y == year else '' }}">{{ y }} <span class="muted small">{{ n }}</span></a>{% endfor %}
+</nav>
+<nav class="event-months">
+  {% for m, label, n in months %}<a href="{{ url_for('events', year=year, month=m) }}" class="{{ 'on' if m == month else '' }}">{{ label.split(' ')[0][:3] }} <span class="muted small">{{ n }}</span></a>{% endfor %}
+</nav>
+
+{% for r in rows %}
+  {% set e = r.event %}
+  <section class="event-card" id="e{{ e.id }}">
+    <header class="row">
+      <strong>{{ e.start[:16].replace("T", " ") }}</strong>
+      {% if e.end != e.start %}<span class="muted">→ {{ e.end[:16].replace("T", " ") }}</span>{% endif %}
+      {% for n in r.named %}<span class="pill ok">{{ n.slug.replace("-", " ") }}</span>{% endfor %}
+      {% for n in r.within %}<span class="pill">› {{ n.slug.split("/")[1].replace("-", " ") }}</span>{% endfor %}
+    </header>
+    <div class="event-strip" data-strip>{{ strip(r.preview) }}</div>
+    {% if r.named and not r.parent %}
+      <p class="muted small">Part of this range is named. See all to name the rest, or unname it from the list above.</p>
+    {% else %}
+      <form method="post" action="{{ url_for('events_name') }}" class="row event-name-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}#e{{ e.id }}">
+        <input type="hidden" name="event" value="{{ e.id }}">
+        {% if r.parent %}<input type="hidden" name="within" value="{{ r.parent.slug }}">
+          <span class="muted small">Within <strong>{{ r.parent.slug.replace("-", " ") }}</strong>:</span>{% endif %}
+        <input name="name" placeholder="{{ 'e.g. museum trip' if r.parent else 'e.g. birthday party' }}" required>
+        <select name="through" title="Through (for an event over several suggestions, e.g. a trip)"
+                data-start="{{ e.start }}" data-end="{{ e.end }}">
+          <option value="" data-end="{{ e.end }}">just this one</option>
+          {% for later in r.later %}
+            <option value="{{ later.id }}" data-end="{{ later.end }}">through {{ later.start[:10] }} {{ later.start[11:16] }} ({{ later.photos }})</option>
+          {% endfor %}
+        </select>
+        <button>{{ "Name within" if r.parent else "Name" }}</button>
+      </form>
+    {% endif %}
+  </section>
+{% else %}
+  <p class="muted">No photos with an exact time yet.</p>
+{% endfor %}
+<p class="muted small">{{ total }} suggested events in all.</p>
+<script>
+  // Picking "through" previews the whole range (the strip and counts) before you name it.
+  document.querySelectorAll(".event-name-form select[name=through]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      const end = select.selectedOptions[0].dataset.end;
+      const strip = select.closest(".event-card").querySelector("[data-strip]");
+      const url = `{{ url_for('events_preview') }}?start=${encodeURIComponent(select.dataset.start)}&end=${encodeURIComponent(end)}`;
+      strip.classList.add("busy");
+      try {
+        const res = await fetch(url);
+        if (res.ok) strip.innerHTML = (await res.json()).html;
+      } finally {
+        strip.classList.remove("busy");
+      }
+    });
+  });
+</script>
 {% endblock %}

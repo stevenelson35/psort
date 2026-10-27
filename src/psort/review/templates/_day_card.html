@@ -9,6 +9,8 @@
       <label class="tick"><input type="checkbox" name="photo" value="{{ p.sha256 }}" form="bulkdel"> select</label>
       {% if not p.is_best and p.favorite %}<div class="pill" title="Starred, but another shot is this moment's best; shown only with the Favorites{{ ' or Private' if p.private }} filter">★ favorite alternate (not this moment's best)</div>
       {%- elif not p.is_best %}<div class="pill" title="Marked private, but another shot is this moment's best; shown only with the Private filter">🔒 private alternate (not this moment's best)</div>{% endif %}
+      {%- set parts = (p.library_path or '').split('/') %}
+      {%- if parts|length >= 4 and not parts[2].startswith('_') %}<div class="pill" title="In an event within this day's event">› {{ parts[2].replace('-', ' ') }}</div>{% endif %}
       {{ card(p, next=day_url ~ "#m-" ~ p.moment_id) }}
       {% if p.is_best %}
       <form method="post" action="{{ url_for('pin_moment', moment_id=p.moment_id) }}" class="pin-form">

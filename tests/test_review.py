@@ -262,10 +262,43 @@ def test_name_and_unname_event(ui, tmp_path):
 
     resp = ui.post_ok("/events/name", event="20260705_090000", name="other")
     assert resp.status_code == 302
-    assert "overlaps" in text(ui.get("/events"))  # flashed error
+    assert "name it within that event instead" in text(ui.get("/events"))  # flashed error
 
     ui.post_ok("/events/unname", name="summer-trip")
     assert "2026/2026-07-05/20260705_120000.heic" in library_files(tmp_path / "library")
+
+
+def test_events_page_previews_and_naming_within_from_see_all(ui, tmp_path):
+    import re
+
+    page = text(ui.get("/events?year=2026&month=2026-07"))
+    # A preview strip per suggestion (thumbnails, counts) and month navigation.
+    assert page.count('class="event-card"') == 3 and "/thumb/" in page and "See all" in page
+    assert 'href="/events?year=2026&amp;month=2026-07"' in page
+    # The live "through" preview returns a strip for the longer range.
+    preview = ui.get("/events/preview?start=2026-07-04T10:15:00&end=2026-07-05T12:00:00").get_json()
+    assert "/thumb/" in preview["html"] and "2 days" in preview["html"]
+
+    ui.post_ok("/events/name", event="20260703_145633", name="Spring Vacation", through="20260705_090000")
+    # See all for the whole range: every best shot with a Select box tied to the naming form.
+    see_all = text(ui.get("/events/range?start=2026-07-03T00:00:00&end=2026-07-05T23:59:59"))
+    assert 'id="name-photos"' in see_all and '<option value="spring-vacation"' in see_all
+    shas = re.findall(r'name="photo" value="([0-9a-f]{64})" form="name-photos"', see_all)
+    jul4 = sha_of(tmp_path, "20260704_101500")["sha256"]
+    assert jul4 in shas
+    # Name just the Jul 4 photo as an event within the vacation: a sub-folder of that day's vacation folder.
+    ui.post_ok("/events/name-photos", photo=jul4, name="Museum Trip", within="spring-vacation",
+               next="/events/range?start=2026-07-03T00:00:00&end=2026-07-05T23:59:59")
+    files = library_files(tmp_path / "library")
+    assert "2026/2026-07-04_spring-vacation/museum-trip/20260704_101500.jpg" in files
+    # The day page marks it, and the Events page lists both names (the event within, indented).
+    day = text(ui.get("/folder/2026/2026-07-04_spring-vacation"))
+    assert "› museum trip" in day
+    events = text(ui.get("/events?year=2026&month=2026-07"))
+    assert "spring vacation › museum trip" in events and 'class="within"' in events
+    # Selecting nothing is refused with a message.
+    ui.post_ok("/events/name-photos", name="nothing")
+    assert "Select the photos" in text(ui.get("/events"))
 
 
 def test_fix_undated_date(ui, tmp_path):

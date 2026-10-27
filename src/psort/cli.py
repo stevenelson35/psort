@@ -594,8 +594,8 @@ def events_list(ctx: typer.Context) -> None:
     events = events_mod.suggest(conn, cfg.event_gap_hours)
     for e in events:
         span = e.start[:16].replace("T", " ") + (" → " + e.end[:16].replace("T", " ") if e.end != e.start else "")
-        typer.echo(f"  {e.id}  {e.photos:4} photos  {span}  {e.slug or ''}")
-    typer.echo(f"{len(events)} events. Name one: psort events name <id> <name> [--through <id>]")
+        typer.echo(f"  {e.id}  {e.photos:4} photos  {span}  {events_mod.pretty(e.slug) if e.slug else ''}")
+    typer.echo(f"{len(events)} events. Name one: psort events name <id> <name> [--through <id>] [--within <event>]")
 
 
 @events_app.command("name")
@@ -603,11 +603,12 @@ def events_name(
     event: Annotated[str, typer.Argument(help="Event id from `psort events`.")],
     name: Annotated[str, typer.Argument(help="e.g. birthday-party (spaces become hyphens).")],
     through: Annotated[str | None, typer.Option(help="Last event id, for a multi-day event.")] = None,
+    within: Annotated[str | None, typer.Option(help="A named event it's part of (one level deep), e.g. spring-vacation-2026.")] = None,
 ) -> None:
-    """Name an event; its day folders become YYYY-MM-DD_<name>."""
+    """Name an event; its day folders become YYYY-MM-DD_<name> (YYYY-MM-DD_<event>/<name> when --within)."""
     cfg, conn = _open()
     try:
-        slug = events_mod.name(conn, cfg.event_gap_hours, event, name, through)
+        slug = events_mod.name(conn, cfg.event_gap_hours, event, name, through, within)
     except events_mod.EventError as e:
         typer.secho(str(e), fg="red", err=True)
         raise typer.Exit(1) from e
@@ -617,7 +618,7 @@ def events_name(
 
 @events_app.command("unname")
 def events_unname(name: str) -> None:
-    """Remove an event name; its folders go back to plain dates."""
+    """Remove an event name; its folders go back to plain dates (events within it are unnamed too)."""
     cfg, conn = _open()
     try:
         events_mod.unname(conn, name)

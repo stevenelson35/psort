@@ -193,3 +193,22 @@ button.danger:hover { background: var(--error-bg); }
   align-items: center; gap: .75rem; padding: .6rem 1rem; border-radius: 999px; background: var(--surface);
   border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0, 0, 0, .45); }
 .split-bar[hidden] { display: none; }
+
+/* Events: one month at a time, each suggested event with a preview strip; See all to select and name photos. */
+.event-years, .event-months { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0; }
+.event-years a, .event-months a { padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; }
+.event-years a.on, .event-months a.on { background: var(--surface-2); border-color: var(--accent); }
+.event-card { border: 1px solid var(--line); border-radius: 8px; padding: .6rem .8rem; margin: .7rem 0; background: var(--surface); }
+.event-card header { gap: .5rem; flex-wrap: wrap; }
+.event-thumbs { display: flex; gap: .4rem; overflow-x: auto; padding: .4rem 0; }
+.event-thumbs img { height: 110px; width: auto; border-radius: 4px; display: block; }
+.event-strip.busy { opacity: .5; }
+.event-name-form { flex-wrap: wrap; gap: .4rem; }
+.named-events ul { list-style: none; padding-left: 0; }
+.named-events li { margin: .25rem 0; }
+.named-events li.within { padding-left: 1.4rem; }
+.event-select-bar { position: sticky; top: 0; z-index: 5; display: grid; gap: .35rem; padding: .6rem .8rem; margin: .6rem 0;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.event-select-bar .row { gap: .4rem; flex-wrap: wrap; }
+.event-day { margin: 1rem 0 .4rem; font-size: 1.05rem; }
+.event-photo.picked .card { outline: 3px solid #e3a008; outline-offset: -3px; }

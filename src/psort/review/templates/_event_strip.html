@@ -1,0 +1,18 @@
+{# An event at a glance: best shots spread across its time range, its size and people, and See all. Also rendered on
+   its own (GET /events/preview) when "through" changes, to show the whole trip. #}
+{% macro strip(p) -%}
+  <div class="event-preview">
+    <div class="event-thumbs">
+      {% for s in p.sample %}
+        <a href="{{ url_for('moment', moment_id=s.moment_id) }}" title="{{ s.taken_at[:16].replace('T', ' ') }}">
+          <img src="{{ url_for('thumb', sha=s.sha256, size=320) }}" loading="lazy" alt="{{ s.name }}"></a>
+      {% else %}<span class="muted small">No photos with an exact time in this range.</span>{% endfor %}
+    </div>
+    <p class="muted small">
+      {{ p.photos }} photo{{ "" if p.photos == 1 else "s" }} · {{ p.moments }} moment{{ "" if p.moments == 1 else "s" }}
+      · {{ p.days }} day{{ "" if p.days == 1 else "s" }}
+      {% if p.people %} · {{ p.people|join(", ") }}{% endif %}
+      · <a href="{{ url_for('events_range', start=p.start, end=p.end) }}">See all{% if p.moments > p.sample|length %} {{ p.moments }}{% endif %} →</a>
+    </p>
+  </div>
+{%- endmacro %}

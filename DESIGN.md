@@ -177,7 +177,9 @@ a_library/
 - **Naming:** name an event, adding `--through <id>` for multi-day trips.
   - A named event is a **time range**: photos with a real time inside it go in `YYYY-MM-DD_<slug>` folders, in both the library and `videos/`.
   - Photos added later that fall inside it join automatically.
-  - Ranges can't overlap. **Unname** restores plain date folders.
+  - Top-level ranges can't overlap. **Unname** restores plain date folders.
+- **Events within events (one level):** a range that fits inside a named event can be named *within* it (`--within <event>`, or the See-all page's "within …" choice), e.g. a museum trip during a vacation. Its slug is `<parent>/<name>` (`named_events.parent` set), so its photos go in a sub-folder of the parent's day folder: `2026-04-12_spring-vacation-2026/museum-trip/`. Events within one parent can't overlap each other; the parent can't be renamed to dates that leave one outside; naming at the top level a range that's inside an event says to name it within instead. Unnaming a parent unnames the events within it. The day page marks their photos (`› museum trip`). The browse manifest keeps the top-level event as `event` (filtering by the trip shows them) and adds `sub_event`.
+- **Events page:** one year and month at a time (there are thousands of suggestions). Each suggestion shows a preview strip (`EVENT_PREVIEW` = 8 best shots spread across its range), photos / moments / days, the people in it, and its names. Picking "through" fetches the whole range's preview (`/events/preview`) before naming. A suggestion inside a named event offers "Name within". **See all** (`/events/range?start&end`) lists every best shot in the range by day with Select boxes and **Select between**; **Name selected** names the time from the first to the last selected photo, as a new event (splitting a suggestion) or within a named one (`/events/name-photos`). Time-range lookups use the `photos_taken` index (an Events page went from 5.6 s to 0.17 s on the user's library).
 
 ### 5.7 Faces
 
@@ -266,7 +268,7 @@ a_library/
     - ☆, tray, tags, fix date, 🗑 delete
     - Detected faces beside their photo: **Not <name>**, **Ignore face**, **Un-ignore face**, and add/change identification
     - play the Live clip
-  - **★ Favorites** (year/person filters, **◆ top picks only**) · **Close calls** ("Pick this" or confirm "Keep this as best") · **Events** (name/through/unname) · **Faces** (name groups; person pages with "Not <name>") · **Videos** · **Undated** (exact date per photo, or **one date for all ticked**) · **🗑 Trash** (Restore / Empty) · **Post tray** (the composer, §8)
+  - **★ Favorites** (year/person filters, **◆ top picks only**) · **Close calls** ("Pick this" or confirm "Keep this as best") · **Events** (by year/month, preview strips, name/through/within, See all → select and name, unname) · **Faces** (name groups; person pages with "Not <name>") · **Videos** · **Undated** (exact date per photo, or **one date for all ticked**) · **🗑 Trash** (Restore / Empty) · **Post tray** (the composer, §8)
 - Every decision updates the library right away (files move, folders rename), along with highlights.
 - **Clicks stay fast** (reworked 2026-10-08 for the ~100,000-photo library):
   - **Only the changed moments are redone.** ☆/◆, best-shot picks and combine/split pass their moments to `actions.refresh(moments=…)`. That re-scores, re-curates (photos plus their Live clips and Rich packages) and re-syncs highlights for just those moments. Combine/split write `moment_overrides` and apply them directly (`moments.regroup`) instead of re-clustering everything; the next full `cluster()` reapplies the overrides with the same result (`tests/test_fast_clicks.py` checks this). Measured on the real DB: re-scoring the whole library took ~1.5 s, curating ~0.75 s and clustering ~4.3 s; a scoped click takes ~15 ms, plus any file moves and highlight renders (~0.4 s for a new favorite).
@@ -340,7 +342,7 @@ Run with `uv run psort …` from the repo.
 | `verify [batch] [--all]` | Safe-to-delete report (§5.5) |
 | `review [--port]` | Review UI |
 | `close-calls` | Lists near-tie moments |
-| `events` · `events name <id> <name> [--through <id>]` · `events unname <name>` | Events (§5.6) |
+| `events` · `events name <id> <name> [--through <id>] [--within <event>]` · `events unname <name>` | Events (§5.6) |
 | `faces list` · `crops` · `label <name> --group/--face` · `unlabel --face` · `ignore --face` · `unignore --face` · `scan` | Faces from the command line (§5.7) |
 | `highlights` | Syncs `highlights/` and `top_picks/` (also part of `run`) |
 | `top-picks [--out DIR] [--originals]` | Syncs `top_picks/`, and optionally copies the top picks, flat, to DIR (web-size, or full-resolution originals) (§5.9) |
