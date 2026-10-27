@@ -114,6 +114,9 @@ h3.month-title { margin: .8rem 0 .2rem; font-size: 1rem; color: var(--accent); }
 .card figcaption { padding: .35rem .5rem; font-size: .85rem; }
 .card .name { font-family: ui-monospace, monospace; font-size: .8rem; margin-right: .3rem; }
 .people { color: var(--ok); } .tags { color: var(--muted); }
+a.people { display: block; text-decoration: none; }
+a.people:hover .fix-people, a.people:focus .fix-people { text-decoration: underline; }
+.fix-people { color: var(--muted); font-size: .85em; }
 .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 1rem; }
 .shots.zoomable-shots { grid-template-columns: repeat(auto-fill, minmax(var(--image-panel-min, 420px), 1fr)); }
 .shot { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

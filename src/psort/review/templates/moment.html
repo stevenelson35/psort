@@ -31,7 +31,7 @@
 <datalist id="face-people">{% for name in face_people %}<option value="{{ name }}">{% endfor %}</datalist>
 <div class="shots zoomable-shots" id="moment-photos">
 {% for s in shots %}
-  <section class="shot{% if s.is_best %} best{% endif %}">
+  <section class="shot{% if s.is_best %} best{% endif %}" id="shot-{{ s.sha256 }}">
     {% if shots|length > 1 %}<label class="pick-shot" title="Select this shot to remove it from the moment"><input type="checkbox" name="photo" value="{{ s.sha256 }}" form="split-moment"> Select</label>{% endif %}
     <a href="{{ url_for('thumb', sha=s.sha256, size=1280) }}" target="_blank">
       <img src="{{ url_for('thumb', sha=s.sha256, size=1280) }}" loading="lazy" alt="{{ s.name }}">
@@ -39,7 +39,7 @@
     <div class="meta">
       <strong>{{ s.name }}</strong>
       {% if detected_faces.get(s.sha256) %}
-        <details class="detected-faces">
+        <details class="detected-faces" id="faces-{{ s.sha256 }}">
           <summary>{{ detected_faces[s.sha256]|length }} detected face{{ "" if detected_faces[s.sha256]|length == 1 else "s" }} · edit identifications</summary>
           <div class="detected-face-list">
             {% for f in detected_faces[s.sha256] %}
@@ -127,6 +127,21 @@
   </section>
 {% endfor %}
 </div>
+<script>
+  // Arriving from a card's names (#faces-<sha>): open that photo's face editor and bring it into view; a photo with
+  // no detected faces just scrolls to its shot.
+  (() => {
+    const open = () => {
+      const sha = location.hash.startsWith('#faces-') ? location.hash.slice(7) : null
+      if (!sha) return
+      const faces = document.getElementById('faces-' + sha)
+      if (faces) faces.open = true
+      ;(faces || document.getElementById('shot-' + sha))?.scrollIntoView({ block: 'center' })
+    }
+    open()
+    window.addEventListener('hashchange', open)
+  })()
+</script>
 {% if shots|length > 1 %}
 <script>
   // Selected shots get highlighted, and the bottom bar shows how many with the Remove button. Removing every shot

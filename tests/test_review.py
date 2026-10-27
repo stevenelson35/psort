@@ -212,6 +212,13 @@ def test_day_filters_include_visible_people_and_close_calls(ui, tmp_path):
     assert 'data-day-filter="unidentified"' in page
     assert 'data-people=' in page and 'data-close-call="true"' in page
 
+    # The card's names link to that photo's face editor on its moment page, where "Not Alice" fixes a wrong match.
+    moment_id = conn.execute("SELECT moment_id FROM photos WHERE sha256 = ?", (photo["sha256"],)).fetchone()["moment_id"]
+    link = f'/moment/{moment_id}#faces-{photo["sha256"]}'
+    assert f'<a class="people" href="{link}"' in page
+    moment = text(ui.get(f"/moment/{moment_id}"))
+    assert f'id="faces-{photo["sha256"]}"' in moment and "Not Alice" in moment
+
 
 def test_thumbnails_including_heic(ui, tmp_path):
     heic = sha_of(tmp_path, "20260705_120000")["sha256"]
