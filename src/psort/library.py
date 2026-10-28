@@ -28,6 +28,7 @@ class CurateStats:
     moved: int = 0
     unchanged: int = 0
     missing: list[str] = field(default_factory=list)  # names with no library copy and no inbox source
+    repaired: int = 0  # files found left behind in another folder of their day, moved into place
     videos_copied: int = 0
     videos_moved: int = 0
     clips_copied: int = 0
@@ -96,6 +97,20 @@ def desired_paths(conn: sqlite3.Connection, moments: set[str] | None = None) -> 
         else:
             paths[r["sha256"]] = f"{folder}/{ALTERNATES_DIR}/{b['name']}/{r['name']}{r['ext']}"
     return paths
+
+
+def _stray_copy(lib: Path, target: str, sha: str) -> Path | None:
+    """This photo's file somewhere else in its day's folders (same name, same content), as left by a move that was
+    interrupted, e.g. still in the old best shot's _alternates folder. None if there isn't one."""
+    parts = target.split("/")
+    if len(parts) < 3:
+        return None  # undated: no day folder to look in
+    day = parts[1][:10]
+    name = parts[-1]
+    for candidate in sorted((lib / parts[0]).glob(f"{day}*/**/{name}")):
+        if candidate.is_file() and candidate.relative_to(lib).as_posix() != target and sha256_file(candidate) == sha:
+            return candidate
+    return None
 
 
 def _remove_empty_parents(path: Path, root: Path) -> None:
@@ -176,6 +191,17 @@ def curate(
             stats.moved += 1
         elif action == "copy":
             src = _find_source(cfg, conn, sha)
+            if src is None and (stray := _stray_copy(lib, target, sha)) is not None:
+                # Left behind by an interrupted move (e.g. in an old _alternates folder): move it into place.
+                log(f"  found {stray.relative_to(lib).as_posix()} (left behind earlier) → {target}")
+                if not dry_run:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(stray, dest)
+                    _remove_empty_parents(stray, lib)
+                    conn.execute("UPDATE photos SET library_path = ? WHERE sha256 = ?", (target, sha))
+                stats.moved += 1
+                stats.repaired += 1
+                continue
             if src is None:
                 stats.missing.append(row["name"])
                 continue

@@ -162,6 +162,7 @@ a_library/
 
 - **Filenames:** `YYYYMMDD_HHMMSS[_n].<ext>`, assigned once and kept. This matches the blog's naming. A name changes only if you fix a photo's date before publishing it.
 - Every copy is **verified by hash**. Moves (best-pick changes, events, dates) are renames within the library.
+- **Self-repair:** a photo whose file isn't where the database says, with no inbox copy left to copy from, is looked for in its day's folders (same name, same SHA-256: `_stray_copy`), as left by an interrupted move (e.g. still in an old best shot's `_alternates` folder), and moved into place ("Repaired: …"). Only when that fails is it reported as having no library copy.
 - **The layout is psort's.** Don't rearrange it by hand. If you do, `psort reconcile` (§5.11) repairs psort's records.
 
 ### 5.5 Verify (safe to delete)
@@ -251,7 +252,7 @@ a_library/
 - **How:** `recover.py` opens the file with Pillow, tolerating truncation (decodes what's there; the missing part is blank/grey), then falls back to OpenCV. It rejects results that are tiny or blank, and anything over 512 MB. The picture is saved as a quality-95 JPEG keeping the original's EXIF and color profile, so the capture date usually survives. Re-encoding is lossy and the recovered photo is a **separate photo** (new SHA-256), not a repair of the original.
 - **Originals are never touched:** the inbox file and the `unsorted_files/` copy stay. The recovered JPEG is kept in `<state_dir>/recovered/<sha>.jpg` (not a cache: it's included in backups) until `curate` copies it into the library (`library._find_source` falls back to it, so a lost library copy is rebuilt too).
 - **Each attempt is recorded** in `recoveries` (success or failure) so it isn't offered again; `psort recover --retry` retries failures.
-- **When:** `psort run` ends by listing unreadable images and, from a terminal, asking whether to try. Not from a terminal, it just mentions `psort recover`. `--recover` answers yes, `--no-recover` suppresses it. `psort recover [--yes] [--retry]` does it any time. Recovered photos then go through grouping, scoring, curation, faces and highlights immediately.
+- **When:** `psort run` ends by listing unreadable images and, from a terminal, asking whether to try. Not from a terminal, it just mentions `psort recover`. `--recover` answers yes, `--no-recover` suppresses it. `psort recover [--yes] [--retry]` does it any time. Recovered photos then go through grouping, scoring, curation, faces and highlights immediately (`_place_recovered`), with a progress display; scoring, curation and highlights cover only the moments the recovered photos ended up in (a full arrange checks every file, many minutes on OneDrive).
 - **Limits:** a file that isn't really an image (garbage, a disk image with a `.jpg` name) is reported as not recoverable. The user's real data (2026-10-04) had one truncated photo (recoverable, 15 of 3008 rows lost) and one 72 GB "`.jpg`".
 
 ## 6. Review UI

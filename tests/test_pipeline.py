@@ -344,3 +344,24 @@ def test_lock_is_released_even_when_a_run_fails(psort, tmp_path, sample_inbox, m
     assert isinstance(result.exception, RuntimeError)
     monkeypatch.undo()
     assert "Ingest:" in psort("run").output
+
+
+def test_a_file_left_behind_by_an_interrupted_move_is_moved_into_place(psort, tmp_path, sample_inbox):
+    psort("run")
+    conn = db(tmp_path)
+    alt = conn.execute("SELECT sha256, name, library_path FROM photos WHERE library_path LIKE '%/_alternates/%' "
+                       "ORDER BY name LIMIT 1").fetchone()
+    lib = tmp_path / "library"
+    expected = lib / alt["library_path"]
+    # As if a move to a new best shot's folder stopped part-way: the file is still in an old _alternates folder,
+    # and its inbox original has been deleted, so it can't simply be copied again.
+    stray = expected.parent.parent / "20000101_000000" / expected.name
+    stray.parent.mkdir(parents=True)
+    expected.rename(stray)
+    for (path,) in conn.execute("SELECT path FROM sources WHERE sha256 = ?", (alt["sha256"],)).fetchall():
+        (sample_inbox / path).unlink(missing_ok=True)
+
+    out = psort("run").output
+    assert "Repaired: 1 photo(s)" in out and "left behind earlier" in out
+    assert "no library copy" not in out
+    assert expected.exists() and not stray.exists() and not stray.parent.exists()

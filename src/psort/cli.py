@@ -347,11 +347,38 @@ def _offer_recovery(cfg: Config, conn: sqlite3.Connection, assume: bool | None, 
     typer.echo(f"Recovered {sum(o.sha is not None for o in outcomes)} of {len(found)}"
                f"{f' ({added} new photo(s))' if added else ''}. The damaged originals were left as they are.")
     if added:
-        _cluster(cfg, conn)
-        score(cfg, conn)
-        _curate(cfg, conn, False)
-        _faces(cfg, conn)
-        _highlights(cfg, conn)
+        _place_recovered(cfg, conn, {o.sha for o in outcomes if o.new and o.sha})
+
+
+def _place_recovered(cfg: Config, conn: sqlite3.Connection, shas: set[str]) -> None:
+    """Put newly recovered photos in the library: regroup, then score and arrange only the moments they ended up
+    in (checking every file in a library on OneDrive takes many minutes, and nothing else changed), with the same
+    progress display as a run."""
+    names = ["Grouping moments", "Scoring", "Arranging their moments", "Finding faces", "Updating highlights"]
+    p = Progress([Stage(n, 1) for n in names])
+    try:
+        p.start(0)
+        _cluster(cfg, conn, p)
+        p.finish(0)
+        marks = ",".join("?" * len(shas))
+        moments = {r[0] for r in conn.execute(f"SELECT DISTINCT moment_id FROM photos WHERE sha256 IN ({marks})", sorted(shas))}
+        p.start(1, f"{len(moments)} moment(s)")
+        score(cfg, conn, moments)
+        p.finish(1)
+        p.start(2, f"{len(moments)} moment(s)")
+        _curate(cfg, conn, False, p, moments=moments)
+        p.finish(2)
+        p.start(3)
+        _faces(cfg, conn, p)
+        p.finish(3)
+        affected = {r[0] for r in conn.execute(
+            f"SELECT sha256 FROM photos WHERE moment_id IN ({','.join('?' * len(moments))})", sorted(moments))}
+        p.start(4)
+        _highlights(cfg, conn, p, shas=affected)
+        p.finish(4)
+        p.done()
+    finally:
+        p.close()
 
 
 @app.command("recover")
@@ -782,8 +809,8 @@ def _cluster(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None)
     _say(p)(f"Moments: {moments} ({copies} visual duplicates set aside in _duplicates)")
 
 
-def _highlights(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None) -> None:
-    s = highlights_mod.sync(cfg, conn, log=_say(p))
+def _highlights(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None, shas: set[str] | None = None) -> None:
+    s = highlights_mod.sync(cfg, conn, log=_say(p), shas=shas)
     if s.written or s.moved or s.removed:
         _say(p)(f"Highlights: {s.written} written, {s.moved} moved, {s.removed} removed → {cfg.highlights}")
     if (t := s.top) and (t.written or t.moved or t.removed):
@@ -800,11 +827,15 @@ def _faces(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None) -
     write_manifest(cfg, conn)
 
 
-def _curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool, p: "Progress | None" = None) -> None:
+def _curate(cfg: Config, conn: sqlite3.Connection, dry_run: bool, p: "Progress | None" = None,
+            moments: set[str] | None = None) -> None:
     say = _say(p)
-    s = curate(cfg, conn, dry_run=dry_run, log=say, progress=(lambda d, t: p.update(d, t, "photos")) if p else None)
+    s = curate(cfg, conn, dry_run=dry_run, log=say, progress=(lambda d, t: p.update(d, t, "photos")) if p else None,
+               moments=moments)
     prefix = "Would curate" if dry_run else "Curate"
     say(f"{prefix}: {s.copied} copied, {s.moved} moved, {s.unchanged} unchanged")
+    if s.repaired:
+        say(f"Repaired: {s.repaired} photo(s) found left behind by an interrupted move, now in place")
     if s.videos_copied or s.videos_moved:
         say(f"{prefix} videos: {s.videos_copied} copied, {s.videos_moved} moved → {cfg.videos}")
     if s.clips_copied:

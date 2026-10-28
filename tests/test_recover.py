@@ -113,3 +113,18 @@ def test_recovered_copy_can_be_rebuilt_from_the_state_directory(psort, tmp_path,
     assert "2026/2026-07-15/20260715_120000.jpg" in library_files(tmp_path / "library")
     assert "have no library copy" not in out
     assert list((tmp_path / "state/recovered").glob("*.jpg"))
+
+
+def test_placing_recovered_photos_arranges_only_their_moments(psort, tmp_path, sample_inbox):
+    add_damaged(sample_inbox)
+    psort("run")
+    # A file elsewhere in the library goes missing: a full arrange would put it back; placing the recovered photo
+    # must not even look (that's what made it take many silent minutes on OneDrive).
+    other = tmp_path / "library/2026/2026-07-05/20260705_120000.heic"
+    moved_away = tmp_path / "elsewhere.heic"
+    shutil.move(other, moved_away)
+    out = psort("recover", "--yes").output
+    assert "Recovered 1 of 2 (1 new photo(s))" in out
+    assert "2026/2026-07-15/20260715_120000.jpg" in library_files(tmp_path / "library")
+    assert not other.exists()  # not checked: only the recovered photo's moment was arranged
+    shutil.move(moved_away, other)
