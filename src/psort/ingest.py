@@ -38,12 +38,43 @@ class IngestStats:
     live_clips: int = 0  # iPhone Live Photo clips, kept beside their photo
     others: int = 0  # everything else, kept in unsorted_files
     junk: int = 0  # OS caches like Thumbs.db: not copied
+    empty: int = 0  # 0-byte files (e.g. a camera's abandoned .temp- recording): nothing to copy
     deleted: int = 0  # photos you deleted in psort, seen again in the inbox
     arriving: int = 0  # still being copied in: left for the next run
     replaced: int = 0  # changed since last seen (e.g. a partial copy finished): old copies cleaned up
     recovered: int = 0  # unreadable before, read fine now
     rich_packages: int = 0  # Nokia Rich Capture .nar packages
     rich_frames: int = 0  # photos unpacked from them
+
+
+# An empty file has nothing to keep: it's recorded (so `psort verify` says it's safe to delete) but not copied.
+EMPTY_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # SHA-256 of zero bytes
+EMPTY_REASON = "empty file (0 bytes): nothing to keep"
+# Samsung's camera writes a recording to a hidden '.temp-…' file and renames it when done; a leftover one is an
+# unfinished recording. It isn't put among the videos, but it's kept (in unsorted_files) in case it's partly playable.
+TEMP_RECORDING_REASON = "a camera's unfinished recording (.temp- file), kept in case it's partly playable"
+
+
+def drop_empty(cfg: Config, conn: sqlite3.Connection) -> int:
+    """Empty files copied in by older psort versions (an empty video, an empty Live Photo clip, an empty file in
+    unsorted_files): their copies are removed (only files that really are 0 bytes) and their inbox files recorded as
+    empty, like new ones. Returns how many inbox files that was."""
+    from .library import _remove_empty_parents
+
+    found = conn.execute("SELECT COUNT(*) FROM sources WHERE sha256 = ? AND status != 'junk'", (EMPTY_SHA,)).fetchone()[0]
+    if not found:
+        return 0
+    for table, root in (("videos", cfg.videos), ("live_clips", cfg.library), ("other_files", cfg.unsorted)):
+        for (rel,) in conn.execute(f"SELECT library_path FROM {table} WHERE sha256 = ?", (EMPTY_SHA,)).fetchall():
+            copy = root / rel if rel else None
+            if copy and copy.is_file() and copy.stat().st_size == 0:
+                copy.unlink()
+                _remove_empty_parents(copy, root)
+        conn.execute(f"DELETE FROM {table} WHERE sha256 = ?", (EMPTY_SHA,))
+    conn.execute("UPDATE sources SET status = 'junk', reason = ? WHERE sha256 = ? AND status != 'junk'",
+                 (EMPTY_REASON, EMPTY_SHA))
+    conn.commit()
+    return found
 
 
 def batch_of(rel: Path) -> str:
@@ -264,9 +295,15 @@ def ingest(cfg: Config, conn: sqlite3.Connection, log: Callable[[str], None] = p
             ext = path.suffix.lower()
             old_sha = known["sha256"] if known else None
             try:
-                if kind == "junk":
+                if st.st_size == 0:
+                    _record_source(conn, rel, st, "junk", EMPTY_REASON, EMPTY_SHA)
+                    stats.empty += 1
+                elif kind == "junk":
                     _record_source(conn, rel, st, "junk", "OS cache file (rebuilt automatically; not needed)")
                     stats.junk += 1
+                elif kind == "video" and path.name.lower().startswith(".temp-"):
+                    _ingest_other(conn, path, rel, st, "other", TEMP_RECORDING_REASON)
+                    stats.others += 1
                 elif kind == "image":
                     _ingest_photo(cfg, conn, path, rel, st, ext, detector, stats)
                 elif kind == "video":

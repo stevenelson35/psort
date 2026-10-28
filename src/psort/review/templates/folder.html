@@ -78,6 +78,15 @@
     <span id="selection" hidden><span id="selected-count"></span>
       <button type="button" id="clear-selection">Clear</button></span>
   </form>
+  {# Tag the ticked moments: one tap per tag; each tag goes on every photo of those moments. #}
+  <div class="tag-bar" id="tag-bar" data-url="{{ url_for('tag_folder_moments', key=info.key) }}">
+    <span class="muted small">Tag ticked moments:</span>
+    {% for t in tag_choices %}<button type="button" class="tag-chip" data-tag="{{ t }}">{{ t }}</button>{% endfor %}
+    <input id="tag-other" placeholder="other tag" maxlength="40" aria-label="Another tag">
+    <button type="button" id="tag-other-go">Tag</button>
+    <label class="tick inline-tick"><input type="checkbox" id="tag-remove"> remove instead</label>
+    <a class="muted small" href="{{ url_for('tags_page') }}">Edit tags…</a>
+  </div>
   <div class="grid zoomable-grid day-photos" id="day-photos" data-photo-mode="fit">{% for p in photos %}
     {{ day_card(p, photo_people, pinned, request.path) }}
   {% endfor %}</div>
@@ -252,6 +261,39 @@
         if (bulk.dataset.action !== "combine") return;  // Delete ticked reloads the page as before
         event.preventDefault();
         combine(ticked());
+      });
+
+      // Tag chips: add (or, with "remove instead", remove) a tag on every photo of the ticked moments.
+      const tagBar = document.getElementById("tag-bar");
+      async function tagTicked(tag) {
+        const cards = ticked();
+        if (!cards.length) return showError("Tick the moments to tag first.");
+        if (!tag.trim()) return showError("Type a tag first.");
+        const momentIds = [...new Set(cards.map(card => card.dataset.moment))];
+        const form = new FormData();
+        form.append("csrf", bulk.elements.csrf.value);
+        form.append("tag", tag);
+        form.append("mode", document.getElementById("tag-remove").checked ? "remove" : "add");
+        cards.forEach(card => form.append("photo", card.dataset.sha));
+        cards.forEach(card => card.classList.add("busy"));
+        try {
+          const response = await fetch(tagBar.dataset.url, {method: "POST", body: form, headers: {"X-Requested-With": "fetch"}});
+          let result;
+          try { result = await response.json(); } catch { result = {ok: false, error: "Something went wrong (" + response.status + ")."}; }
+          if (!result.ok) throw new Error(result.error);
+          await reloadMoments(momentIds);  // the cards show their #tags; ticks are cleared
+          updateSelection();
+          showMessage(result.message, "ok");
+        } catch (error) {
+          cards.forEach(card => card.classList.remove("busy"));
+          showError(error.message);
+        }
+      }
+      tagBar.querySelectorAll(".tag-chip").forEach(chip => chip.addEventListener("click", () => tagTicked(chip.dataset.tag)));
+      const otherTag = document.getElementById("tag-other");
+      document.getElementById("tag-other-go").addEventListener("click", () => tagTicked(otherTag.value).then(() => { otherTag.value = ""; }));
+      otherTag.addEventListener("keydown", event => {
+        if (event.key === "Enter") { event.preventDefault(); document.getElementById("tag-other-go").click(); }
       });
       undoButton.addEventListener("click", async () => {
         if (!undoData) return;

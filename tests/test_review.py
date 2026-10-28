@@ -593,3 +593,60 @@ def test_big_face_group_page_names_only_ticked_faces(ui, tmp_path):
     rows = {r["id"]: r for r in conn.execute("SELECT id, label_source FROM faces")}
     assert all(rows[int(i)]["label_source"] == "user" for i in ticked)
     assert conn.execute("SELECT COUNT(*) FROM face_rejections").fetchone()[0] == 0  # unticked: undecided
+
+
+def test_tags_from_day_and_moment_pages_and_the_tags_page(ui, tmp_path):
+    import re
+
+    day = text(ui.get("/folder/2026/2026-07-03"))
+    # Until you make your own list, the chips offer the suggestions.
+    assert 'id="tag-bar" data-url="/folder/2026/2026-07-03/tag"' in day and 'data-tag="christmas card"' in day
+    best = sha_of(tmp_path, "20260703_145634")
+    moment = best["moment_id"]
+    shots = [r["sha256"] for r in db(tmp_path).execute("SELECT sha256 FROM photos WHERE moment_id = ?", (moment,))]
+    assert len(shots) > 1  # the moment has alternates; tagging must reach them too
+
+    # The day page's script sends the ticked cards' photos with fetch() and gets JSON back.
+    resp = ui.post("/folder/2026/2026-07-03/tag", data={"csrf": re.search(r'name="csrf" value="([^"]+)"', day).group(1),
+                   "photo": best["sha256"], "tag": "  Ballet  "}, headers={"X-Requested-With": "fetch"})
+    assert resp.get_json() == {"ok": True, "moments": 1, "tag": "ballet", "message": "Tagged 1 moment: ballet"}
+    tagged = {r[0] for r in db(tmp_path).execute("SELECT sha256 FROM tags WHERE tag = 'ballet'")}
+    assert tagged == set(shots)
+    assert "#ballet" in text(ui.get("/folder/2026/2026-07-03"))
+
+    # The moment page shows the moment's tags (removable) and adds others with one tap.
+    page = text(ui.get(f"/moment/{moment}"))
+    assert "ballet ✕" in page and "+ nutcracker" in page
+    ui.post_ok(f"/moment/{moment}/tag", tag="nutcracker", mode="add")
+    ui.post_ok(f"/moment/{moment}/tag", tag="ballet", mode="remove")
+    assert not db(tmp_path).execute("SELECT 1 FROM tags WHERE tag = 'ballet'").fetchone()
+    assert db(tmp_path).execute("SELECT COUNT(*) FROM tags WHERE tag = 'nutcracker'").fetchone()[0] == len(shots)
+    ui.post_ok("/folder/2026/2026-07-03/tag", tag="nutcracker")  # nothing ticked
+    assert "Tick the moments to tag first" in text(ui.get("/folder/2026/2026-07-03"))
+
+    # The Tags page: counts, the tag's moments (best shot, linking to its moment and day), and favorites only.
+    tags = text(ui.get("/tags?tag=nutcracker"))
+    assert "★ Favorites" in tags  # the menu keeps its own counts
+    assert "nutcracker <span class=\"muted\">1</span>" in tags and f"/moment/{moment}" in tags
+    assert f"/folder/2026/2026-07-03#m-{moment}" in tags
+    assert "No favorites tagged" in text(ui.get("/tags?tag=nutcracker&favorites=1"))
+    ui.post_ok(f"/photo/{best['sha256']}/favorite")
+    assert f"/moment/{moment}" in text(ui.get("/tags?tag=nutcracker&favorites=1"))
+
+    # Your fixed set: add (comma separated), the suggestions in one go, take one off; the chips follow.
+    ui.post_ok("/tags/choices", add="Pets, school day")
+    assert re.findall(r'data-tag="([^"]+)"', text(ui.get("/folder/2026/2026-07-03"))) == ["pets", "school day"]
+    ui.post_ok("/tags/choices", remove="pets")
+    assert "pets" not in re.findall(r'data-tag="([^"]+)"', text(ui.get("/folder/2026/2026-07-03")))
+    ui.post_ok("/tags/choices", add="christmas card, nutcracker")
+    assert "christmas card" in text(ui.get("/tags"))
+
+
+def test_browse_manifest_carries_tags(ui, tmp_path):
+    from psort import browse
+
+    best = sha_of(tmp_path, "20260703_145634")
+    ui.post_ok(f"/photo/{best['sha256']}/favorite")
+    ui.post_ok(f"/moment/{best['moment_id']}/tag", tag="Christmas Card")
+    by_id = {p["id"]: p for p in browse.build_manifest(db(tmp_path))["photos"]}
+    assert by_id["20260703_145634"]["tags"] == ["christmas card"]

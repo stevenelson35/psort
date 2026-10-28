@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_macros.html" import card, post %}
+{% block title %}Tags{% endblock %}
+{% block content %}
+<h1>Tags{% if tag %}: {{ tag }}{% endif %}</h1>
+<p class="muted">Tag moments from a day page (tick them, then tap a tag) or a moment page; a tag goes on every photo in
+  the moment. Use tags for themes you'll want to find across years (Christmas card, school day, ballet, pets);
+  people come from Faces and one-off happenings from Events.</p>
+
+<section class="tag-choices">
+  <h2>Your tags <span class="muted small">(the chips on day and moment pages)</span></h2>
+  <div class="tag-bar">
+    {% for t in choices %}
+      <span class="tag-chip on">{{ t }}
+        <form method="post" action="{{ url_for('tag_choices_edit') }}" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="remove" value="{{ t }}">
+          <button class="link-button" title="Take it off the chips (photos keep the tag)">✕</button></form></span>
+    {% else %}<span class="muted small">None yet: until you add some, the chips offer the suggestions below.</span>{% endfor %}
+  </div>
+  <form method="post" action="{{ url_for('tag_choices_edit') }}" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="add" placeholder="new tags, comma separated" required>
+    <button>Add</button>
+  </form>
+  {% if suggested %}
+    <form method="post" action="{{ url_for('tag_choices_edit') }}" class="row">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="add" value="{{ suggested|join(', ') }}">
+      <span class="muted small">Suggested: {{ suggested|join(", ") }}</span>
+      <button>Add these</button>
+    </form>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Tagged moments</h2>
+  <div class="tag-bar">
+    {% for c in tag_counts %}
+      <a class="tag-chip{% if c.tag == tag %} on{% endif %}" href="{{ url_for('tags_page', tag=c.tag, favorites='1' if favorites_only else None) }}">{{ c.tag }} <span class="muted">{{ c.moments }}</span></a>
+    {% else %}<span class="muted small">Nothing tagged yet.</span>{% endfor %}
+  </div>
+  {% if tag %}
+    <p class="row">
+      <a href="{{ url_for('tags_page', tag=tag) }}" class="{{ '' if favorites_only else 'on' }} filter-link">All moments</a>
+      <a href="{{ url_for('tags_page', tag=tag, favorites='1') }}" class="{{ 'on' if favorites_only else '' }} filter-link">★ Favorites only</a>
+      <span class="muted small">{{ total }} {{ "favorite" if favorites_only else "moment" }}{{ "" if total == 1 else "s" }}</span>
+    </p>
+    {% for month, rows in months.items() %}
+      <h3>{{ month }} <span class="muted small">{{ rows|length }}</span></h3>
+      <div class="grid">
+        {% for p in rows %}
+          {% set key = folder_key(p.library_path) %}{% set when, event = pretty_folder(key) %}
+          <div class="tag-result">
+            {{ card(p, next=request.full_path.rstrip('?')) }}
+            <a class="muted small" href="{{ url_for('folder', key=key) }}#m-{{ p.moment_id }}">{{ when }}{% if event %} · {{ event }}{% endif %} →</a>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">{{ "No favorites" if favorites_only else "No moments" }} tagged “{{ tag }}”.</p>
+    {% endfor %}
+  {% endif %}
+</section>
+{% endblock %}

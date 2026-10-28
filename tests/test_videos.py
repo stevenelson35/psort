@@ -158,3 +158,47 @@ def test_thm_date_fixes_videos_already_filed_by_month(psort, tmp_path, sample_in
     psort("run")
     files = video_files(tmp_path / "videos")
     assert "2015/2015-05-09/20150509_144323.mpg" in files and not any("unknown-day" in f for f in files)
+
+
+def test_empty_files_and_unfinished_recordings(psort, tmp_path, sample_inbox):
+    phone = sample_inbox / "zfold"
+    phone.mkdir(parents=True, exist_ok=True)
+    (phone / ".temp-20250726_133028002_BACK.mp4").write_bytes(b"")  # an abandoned, empty recording
+    make_video(phone / ".temp-20250727_090000001_BACK.mp4")  # unfinished but with content
+    (phone / "IMG_7000.JPG").write_bytes(b"")
+    save(phone / "IMG_7001.HEIC", scene(97), "2026:07:08 10:00:00", model="iPhone 15", make="Apple", fmt="HEIF")
+    (phone / "IMG_7001.MOV").write_bytes(b"")  # an empty Live Photo clip
+
+    out = psort("run").output
+    assert "Empty files: 3 skipped" in out
+    assert not any(f.endswith((".temp-20250726_133028002_BACK.mp4",)) for f in video_files(tmp_path / "videos"))
+    assert not any(p.stat().st_size == 0 for p in (tmp_path / "videos").rglob("*") if p.is_file())
+    assert not (tmp_path / "library/2026/2026-07-08/20260708_100000.mov").exists()  # no empty clip beside the photo
+    # The unfinished recording with content is kept, but not among the videos.
+    assert (tmp_path / "unsorted_files/zfold/.temp-20250727_090000001_BACK.mp4").exists()
+    verify = psort("verify", "zfold", "--all").output
+    assert "safe to delete" in verify and "empty file (0 bytes)" in verify and "unfinished recording" in verify
+
+
+def test_empty_copies_from_older_runs_are_cleaned_up(psort, tmp_path, sample_inbox):
+    phone = sample_inbox / "zfold"
+    phone.mkdir(parents=True, exist_ok=True)
+    (phone / "VID_20250726_133028.mp4").write_bytes(b"")
+    psort("run")
+    # Simulate a library from before empty files were skipped: the empty video was copied in.
+    conn = sqlite3.connect(tmp_path / "state/psort.db")
+    empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    conn.execute("UPDATE sources SET status = 'video', reason = NULL WHERE sha256 = ?", (empty,))
+    conn.execute("INSERT INTO videos (sha256, ext, taken_at, date_source, name, library_path) VALUES "
+                 "(?, '.mp4', '2025-07-26T13:30:28', 'filename', '20250726_133028', '2025/2025-07-26/20250726_133028.mp4')", (empty,))
+    conn.commit()
+    copy = tmp_path / "videos/2025/2025-07-26/20250726_133028.mp4"
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    copy.write_bytes(b"")
+
+    out = psort("run").output
+    assert "removed the copies of 1 empty" in out
+    assert not copy.exists() and not copy.parent.exists()
+    assert conn.execute("SELECT COUNT(*) FROM videos WHERE sha256 = ?", (empty,)).fetchone()[0] == 0
+    assert conn.execute("SELECT status FROM sources WHERE sha256 = ?", (empty,)).fetchone()[0] == "junk"
+    assert "safe to delete" in psort("verify", "zfold").output

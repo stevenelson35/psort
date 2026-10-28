@@ -279,6 +279,8 @@ def _run_pipeline(cfg: Config, conn: sqlite3.Connection, dry_run: bool, recover:
     p = Progress([Stage(n, 1) for n in names])
     p.start(0, "looking at the inbox…")
     try:
+        if not dry_run and (dropped := ingest_mod.drop_empty(cfg, conn)):
+            p.echo(f"Empty files: removed the copies of {dropped} empty (0-byte) file(s) from earlier runs")
         files, pending = ingest_mod.plan(cfg, conn, note=p.note, inbox_event=p.echo)
     except BaseException:
         p.close()
@@ -757,6 +759,8 @@ def _ingest(cfg: Config, conn: sqlite3.Connection, p: "Progress | None" = None, 
         f"{s.others} other files, {s.errors} unreadable"
         + (f", {s.deleted} you deleted before (not copied)" if s.deleted else "")
     )
+    if s.empty:
+        say(f"Empty files: {s.empty} skipped (0 bytes, nothing to keep)")
     if s.arriving:
         say(typer.style(f"{s.arriving} file(s) still arriving (changed in the last {cfg.settle_seconds:.0f}s): "
                         "left for the next run.", fg="yellow"))

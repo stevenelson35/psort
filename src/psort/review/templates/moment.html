@@ -27,6 +27,19 @@
     <button type="button" id="split-clear">Clear</button>
   </div>
 {% endif %}
+<div class="tag-bar moment-tags">
+  <span class="muted small">Tags for this moment (every photo in it):</span>
+  {% for t in moment_tags %}{{ post(url_for('tag_moment', moment_id=moment_id), t ~ " ✕", "tag-chip on",
+       title="Remove “" ~ t ~ "” from this moment", fields={"tag": t, "mode": "remove"}) }}{% endfor %}
+  {% for t in tag_choices if t not in moment_tags %}{{ post(url_for('tag_moment', moment_id=moment_id), "+ " ~ t, "tag-chip",
+       fields={"tag": t, "mode": "add"}) }}{% endfor %}
+  <form method="post" action="{{ url_for('tag_moment', moment_id=moment_id) }}" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <input name="tag" placeholder="other tag" maxlength="40" required aria-label="Another tag">
+    <button>Tag</button>
+  </form>
+</div>
 {{ image_zoom("moment-photos", 420, 260, 700, 40) }}
 <datalist id="face-people">{% for name in face_people %}<option value="{{ name }}">{% endfor %}</datalist>
 <div class="shots zoomable-shots" id="moment-photos">

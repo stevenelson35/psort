@@ -134,6 +134,13 @@ CREATE TABLE IF NOT EXISTS tags (
     tag     TEXT NOT NULL,
     PRIMARY KEY (sha256, tag)
 );
+CREATE INDEX IF NOT EXISTS tags_tag ON tags(tag);
+
+-- Your fixed set of tags: the one-tap chips on day and moment pages (managed on the Tags page).
+CREATE TABLE IF NOT EXISTS tag_list (
+    tag      TEXT PRIMARY KEY,
+    position INTEGER NOT NULL DEFAULT 0
+);
 
 -- Photos you deleted. Kept out of `photos` so nothing else sees them; remembered so the inbox copy
 -- is never copied back. trash_path is set while the file is in library/_trash (restorable);

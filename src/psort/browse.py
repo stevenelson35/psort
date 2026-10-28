@@ -64,6 +64,9 @@ def build_manifest(conn: sqlite3.Connection) -> dict:
            JOIN favorites fav ON fav.sha256 = f.sha256 ORDER BY p.name"""
     ):
         people.setdefault(r["sha256"], []).append(r["name"])
+    tags: dict[str, list[str]] = {}
+    for r in conn.execute("SELECT t.sha256, t.tag FROM tags t JOIN favorites fav ON fav.sha256 = t.sha256 ORDER BY t.tag"):
+        tags.setdefault(r["sha256"], []).append(r["tag"])
     ranges = named_ranges(conn)
     by_slug = {r["slug"]: r for r in ranges}
     used_events: set[str] = set()
@@ -75,6 +78,8 @@ def build_manifest(conn: sqlite3.Connection) -> dict:
         photo = {"id": r["name"], "taken_at": r["taken_at"], "people": people.get(r["sha256"], []), "event": top_slug(slug)}
         if slug and "/" in slug:
             photo["sub_event"] = slug  # only present when nested, so older data and manifests are unchanged
+        if tags.get(r["sha256"]):
+            photo["tags"] = tags[r["sha256"]]  # only when tagged; the browse page filters by them
         if r["top"]:
             photo["top"] = True  # only present on top picks, so older data and manifests are unchanged
         photos.append(photo)

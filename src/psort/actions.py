@@ -247,6 +247,61 @@ def set_tags(cfg: Config, conn: sqlite3.Connection, sha: str, text: str) -> list
     return tags
 
 
+# Offered on the Tags page until you've made your own list.
+SUGGESTED_TAGS = ["christmas card", "school day", "school year", "professional", "ballet", "nutcracker",
+                  "disney", "dogs", "cats"]
+
+
+def clean_tag(text: str) -> str:
+    """A tag as stored: lowercase, single spaces, at most 40 characters, no commas (they separate tags)."""
+    tag = " ".join(text.lower().split())
+    if not tag:
+        raise ActionError("Type a tag first.")
+    if "," in tag or len(tag) > 40:
+        raise ActionError("A tag is one short name (up to 40 characters, no commas).")
+    return tag
+
+
+def tag_moments(cfg: Config, conn: sqlite3.Connection, moment_ids: list[str], text: str, add: bool = True) -> int:
+    """Add (or remove) a tag on every photo of these moments, alternates and duplicates included, so the moment
+    is found by it whichever shot ends up best. Returns how many moments."""
+    tag = clean_tag(text)
+    ids = sorted(set(moment_ids))
+    if not ids:
+        raise ActionError("Tick the moments to tag first.")
+    marks = ",".join("?" * len(ids))
+    shas = [r[0] for r in conn.execute(f"SELECT sha256 FROM photos WHERE moment_id IN ({marks})", ids)]
+    if not shas:
+        raise ActionError("Those moments no longer exist.")
+    if add:
+        conn.executemany("INSERT OR IGNORE INTO tags (sha256, tag) VALUES (?, ?)", [(s, tag) for s in shas])
+    else:
+        conn.execute(f"DELETE FROM tags WHERE tag = ? AND sha256 IN ({','.join('?' * len(shas))})", [tag, *shas])
+    conn.commit()
+    highlights.sync(cfg, conn, shas=set(shas))  # tags show as Windows Tags on highlight copies
+    _manifest(cfg, conn)
+    return len({r[0] for r in conn.execute(f"SELECT DISTINCT moment_id FROM photos WHERE moment_id IN ({marks})", ids)})
+
+
+def tag_choices(conn: sqlite3.Connection) -> list[str]:
+    """Your fixed set of tags, in the order you added them."""
+    return [r[0] for r in conn.execute("SELECT tag FROM tag_list ORDER BY position, tag")]
+
+
+def add_tag_choice(conn: sqlite3.Connection, text: str) -> str:
+    tag = clean_tag(text)
+    position = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 FROM tag_list").fetchone()[0]
+    conn.execute("INSERT OR IGNORE INTO tag_list (tag, position) VALUES (?, ?)", (tag, position))
+    conn.commit()
+    return tag
+
+
+def remove_tag_choice(conn: sqlite3.Connection, text: str) -> None:
+    """Take a tag off the chips (photos keep it; the Tags page still lists it)."""
+    conn.execute("DELETE FROM tag_list WHERE tag = ?", (clean_tag(text),))
+    conn.commit()
+
+
 def toggle_tray(conn: sqlite3.Connection, sha: str) -> bool:
     """Add to / remove from the post tray. Returns True if it's now in the tray."""
     _photo(conn, sha)

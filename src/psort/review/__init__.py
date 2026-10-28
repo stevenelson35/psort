@@ -250,7 +250,8 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         ).fetchall()
         pinned = {r[0] for r in db().execute("SELECT moment_id FROM library_pins")}
         return render_template("folder.html", info=info, photos=photos, videos=videos,
-                               people=people, photo_people=photo_people, nav=nav, pinned=pinned)
+                               people=people, photo_people=photo_people, nav=nav, pinned=pinned,
+                               tag_choices=actions.tag_choices(db()) or actions.SUGGESTED_TAGS)
 
     @app.get("/folder/<path:key>/cards")
     def folder_cards(key):
@@ -293,9 +294,13 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
         ):
             detected_faces[face["sha256"]].append(face)
         people = [r["name"] for r in db().execute("SELECT name FROM people ORDER BY name")]
+        moment_tags = [r[0] for r in db().execute(
+            "SELECT DISTINCT t.tag FROM tags t JOIN photos p ON p.sha256 = t.sha256 WHERE p.moment_id = ? ORDER BY t.tag",
+            (moment_id,))]
         return render_template("moment.html", shots=shots, moment_id=moment_id,
                                folder_key=folder_key(shots[0]["library_path"]),
-                               detected_faces=detected_faces, face_people=people)
+                               detected_faces=detected_faces, face_people=people, moment_tags=moment_tags,
+                               tag_choices=actions.tag_choices(db()) or actions.SUGGESTED_TAGS)
 
     @app.get("/close-calls")
     def close_calls():
@@ -422,6 +427,78 @@ def create_app(cfg: Config, config_path: Path | None = None) -> Flask:
     @app.post("/photo/<sha>/best")
     def best(sha):
         return act(actions.pick_best, cfg, db(), sha)
+
+    # ---- Tags ----
+
+    def tag_response(moment_ids: list[str], default: str):
+        """Tag (or untag) moments from a day or moment page; the day page's script gets JSON and refreshes the cards."""
+        tag, add = request.form.get("tag", ""), request.form.get("mode", "add") != "remove"
+        try:
+            n = actions.tag_moments(cfg, db(), moment_ids, tag, add)
+        except actions.ActionError as e:
+            return fail(str(e), default)
+        clean = actions.clean_tag(tag)
+        message = f"{'Tagged' if add else 'Removed the tag from'} {n} moment{'' if n == 1 else 's'}: {clean}"
+        if wants_json():
+            return jsonify(ok=True, moments=n, tag=clean, message=message)
+        flash(message, "ok")
+        return back(default)
+
+    @app.post("/folder/<path:key>/tag")
+    def tag_folder_moments(key):
+        shas = request.form.getlist("photo")
+        ids = [r[0] for r in db().execute(
+            f"SELECT DISTINCT moment_id FROM photos WHERE sha256 IN ({','.join('?' * len(shas)) or 'NULL'})", shas)]
+        return tag_response(ids, url_for("folder", key=key))
+
+    @app.post("/moment/<moment_id>/tag")
+    def tag_moment(moment_id):
+        return tag_response([moment_id], url_for("moment", moment_id=moment_id))
+
+    @app.get("/tags")
+    def tags_page():
+        """Your tags: the fixed set (chips) to manage, every tag in use with how many moments, and one tag's moments
+        (best shot of each, or only the favorites), by month, each linking to its moment and day."""
+        conn = db()
+        tag = request.args.get("tag", "").strip().lower()
+        favorites_only = request.args.get("favorites") == "1"
+        tag_counts = conn.execute(
+            """SELECT t.tag, COUNT(DISTINCT p.moment_id) AS moments FROM tags t JOIN photos p ON p.sha256 = t.sha256
+               WHERE p.library_path IS NOT NULL GROUP BY t.tag ORDER BY t.tag""").fetchall()
+        months: dict[str, list] = {}
+        if tag:
+            if favorites_only:
+                rows = conn.execute(
+                    f"""SELECT {CARD_COLUMNS}, p.taken_at FROM photos p JOIN favorites fv ON fv.sha256 = p.sha256
+                        WHERE p.library_path IS NOT NULL AND EXISTS (SELECT 1 FROM tags t WHERE t.sha256 = p.sha256 AND t.tag = ?)
+                        ORDER BY p.taken_at, p.name""", (tag,)).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""SELECT {CARD_COLUMNS}, p.taken_at FROM photos p
+                        WHERE p.is_best = 1 AND p.duplicate_of IS NULL AND p.library_path IS NOT NULL
+                          AND EXISTS (SELECT 1 FROM tags t JOIN photos m ON m.sha256 = t.sha256
+                                      WHERE t.tag = ? AND m.moment_id = p.moment_id)
+                        ORDER BY p.taken_at, p.name""", (tag,)).fetchall()
+            for r in rows:
+                key = "Undated" if r["library_path"].startswith("_undated/") else month_label(r["library_path"].split("/")[1][:7])
+                months.setdefault(key, []).append(r)
+        choices = actions.tag_choices(conn)
+        return render_template("tags.html", tag=tag, favorites_only=favorites_only, tag_counts=tag_counts, months=months,
+                               choices=choices, suggested=[t for t in actions.SUGGESTED_TAGS if t not in choices],
+                               folder_key=folder_key, pretty_folder=pretty_folder,
+                               total=sum(len(v) for v in months.values()))
+
+    @app.post("/tags/choices")
+    def tag_choices_edit():
+        """Add tags to your fixed set (one, or several separated by commas), or take one off."""
+        def run():
+            if request.form.get("remove"):
+                actions.remove_tag_choice(db(), request.form["remove"])
+            else:
+                for t in request.form.get("add", "").split(","):
+                    if t.strip():
+                        actions.add_tag_choice(db(), t)
+        return act(run, default=url_for("tags_page"))
 
     @app.post("/folder/<path:key>/combine")
     def combine_moments(key):

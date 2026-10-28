@@ -212,3 +212,17 @@ button.danger:hover { background: var(--error-bg); }
 .event-select-bar .row { gap: .4rem; flex-wrap: wrap; }
 .event-day { margin: 1rem 0 .4rem; font-size: 1.05rem; }
 .event-photo.picked .card { outline: 3px solid #e3a008; outline-offset: -3px; }
+
+/* Tags: chips on day and moment pages, and the Tags page. */
+.tag-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin: .5rem 0; }
+.tag-chip { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .65rem; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface); color: var(--fg); font-size: .9rem; cursor: pointer; text-decoration: none; }
+.tag-chip:hover { border-color: var(--accent); }
+.tag-chip.on { background: var(--surface-2); border-color: var(--accent); }
+.tag-bar form.inline { display: inline; margin: 0; }
+.tag-bar input { max-width: 11rem; }
+.tag-bar .inline-tick { display: inline-flex; gap: .25rem; margin: 0; }
+.link-button { background: none; border: none; padding: 0; color: var(--muted); cursor: pointer; }
+.filter-link { padding: .15rem .55rem; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; }
+.filter-link.on { border-color: var(--accent); background: var(--surface-2); }
+.tag-result { display: grid; gap: .2rem; }
